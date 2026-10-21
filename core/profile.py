@@ -175,7 +175,8 @@ def describe(profile: Optional[Dict[str, Any]]) -> str:
     proc = str(m.get("process") or "").strip()
     title = str(m.get("title") or "").strip()
     if not proc and not title:
-        return f"{name}（未指定窗口）"
+        # 没设目标窗口：名字本身通常已经说明了（如「通用（未指定应用）」），不再叠括号
+        return name or "（未指定窗口）"
     if proc and not title and proc.lower() in name.lower():
         # 名字里已经写了进程名，别再加一遍括号
         return name

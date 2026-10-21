@@ -58,4 +58,5 @@ DEFAULT_SETTINGS = {
     "wake_lead_seconds": 90,  # 提前多久唤醒系统
     "minimize_to_tray": True,
     "autostart": False,
+    "dark_ui": False,         # 深色界面（需要 sv-ttk，没装时该项无效）
 }

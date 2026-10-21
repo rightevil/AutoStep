@@ -25,7 +25,7 @@ mise install        # 装 Python 3.13（已在 mise.toml 里锁版本）
 mise run install    # 建 .venv + 装依赖
 ```
 
-依赖只有 5 个：mss、Pillow、pywin32、pyperclip、pystray，总共十几 MB。界面用 Python 自带的 tkinter，无需额外安装；打包用 PyInstaller（只有出包时需要，见 `.github/workflows/release.yml`）。
+依赖只有 6 个：mss、Pillow、pywin32、pyperclip、pystray、sv-ttk，总共十几 MB。界面用 Python 自带的 tkinter，主题由 sv-ttk 提供（Win11 风格）；**没装 sv-ttk 也能跑**，会自动退回系统默认主题，只是样式朴素些。打包用 PyInstaller（只有出包时需要，见 `.github/workflows/release.yml`）。
 
 ## 二、启动
 
@@ -99,19 +99,24 @@ mise run start
 - **迟到不补跑**：到点时没跑成（关机、锁屏、程序没开），超过 5 分钟就算错过，跳过本次等下一个周期——避免醒来后连着打好几遍。日志里会写「错过 N 分钟，跳过本次」。
 - 计划表里能看到用的是哪套动作、触发方式、状态（待执行 / 已完成 / 已停用 / 已过期）、下次触发、上次结果。
 
-## 五、执行设置
+## 五、设置
+
+设置是窗口顶部和「执行」**同级的标签页**，不是弹窗，也不占主界面地方：
 
 | 项 | 说明 |
 |---|---|
 | 步间固定延时 | 每两步之间等待多少秒。日志里查询这类操作建议 ≥1.5 |
 | 激活后等待 | 窗口切前台后额外等多久 |
-| 输入方式 | **跟着档案走**，这里只显示当前档案用的哪一种 |
 | 执行后截图存证 | 存到 `data/shots/` |
 | 执行前唤醒系统 | 到点前 90 秒用可等待定时器把系统从睡眠唤醒 |
 | 关闭窗口时缩到托盘 | 关窗后调度器仍活着 |
 | 开机自动启动 | 写 `HKCU\...\CurrentVersion\Run` |
+| 深色界面 | 需要 `sv-ttk`；没装时这一项是灰的 |
+| 数据目录 / 日志目录 | 直接打开对应文件夹，换机器把数据目录拷走即可 |
 
-输入方式、清空、发送键这些「跟应用相关」的项已经搬进档案，全局设置里只留「跟节奏和系统相关」的项。
+改一项就存一项，**没有「保存 / 取消」按钮**，切回「执行」页立刻生效。
+
+输入方式、清空、发送键这些「跟应用相关」的项在**档案**里（主界面「目标应用」那栏能看到当前档案用的是哪一种），设置页只留「跟节奏和系统相关」的项。
 
 ## 六、必须知道的限制
 
@@ -141,6 +146,9 @@ data/shots/*.png    执行后截图
 .venv/Scripts/python.exe tests/schedule_e2e.py # 定时自动触发全链路（6 项，接管鼠标约 10 秒）
 .venv/Scripts/python.exe tests/trigger_test.py  # 触发模型 + 排期（37 项，纯逻辑）
 .venv/Scripts/python.exe tests/ui_plan_dialog.py # 计划对话框交互：改时刻/点星期/切换（10 项）
+.venv/Scripts/python.exe tests/ui_dialogs.py     # 每个对话框都能量出来（7 项，防拆包漏 import）
+.venv/Scripts/python.exe tests/ui_theme.py       # 深浅主题切换、配色与行高不被重置（12 项）
+.venv/Scripts/python.exe tests/ui_settings_tab.py # 设置是同级别标签页、改动即时保存（10 项）
 ```
 
 `tests/ui_shot.py`、`tests/ui_profile_shot.py`、`tests/dialog_shot.py` 会把主界面和对话框渲染成 PNG 存到 `data/shots/`，用于核对布局；`ui_profile_shot.py` 用的是临时数据，不会碰你的 `data/store.json`。
@@ -157,7 +165,15 @@ core/executor.py     动作回放（点击 / Unicode 逐字符 / 剪贴板粘贴
 core/trigger.py      触发规则：解析、算下一次、生成摘要文案
 core/scheduler.py    调度循环（睡到下一次触发点）+ 唤醒布防
 core/store.py        JSON 持久化与下次触发时间计算
-core/ui.py           主界面、对话框、托盘图标
+core/ui/             界面层（按类拆包，单文件曾涨到 1500 行）
+core/ui/app.py         主窗口（执行页）：动作列表、计划、日志、托盘
+core/ui/plan_dialog.py 计划对话框
+core/ui/profile_dialog.py  应用档案对话框
+core/ui/calendar_dialog.py 月历选择器
+core/ui/prompts.py     单行输入 / 多行文本 / 按键三个小框
+core/ui/common.py      字体常量
+core/ui/settings_page.py  设置页（执行参数 / 系统行为 / 外观 / 文件位置）
+core/ui/theme.py       主题与配色：套 sv-ttk、给 tk 原生控件取匹配的颜色
 core/icon.py         图标绘制（托盘与 exe 图标共用）
 tools/make_icon.py   生成 assets/autostep.ico
 AutoStep.spec        PyInstaller 打包配置

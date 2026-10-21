@@ -37,7 +37,7 @@ Asking an AI coding agent the same thing every night (a nightly refactor prompt,
 - Python 3.13 (pinned in `mise.toml`; any 3.10+ should work)
 - Optional: [mise](https://mise.jdx.dev/) for automatic toolchain setup
 
-Runtime dependencies: `mss`, `Pillow`, `pywin32`, `pyperclip`, `pystray` (about 15 MB total). The UI is plain `tkinter`, so nothing extra to install.
+Runtime dependencies: `mss`, `Pillow`, `pywin32`, `pyperclip`, `pystray`, `sv-ttk` (about 15 MB total). The UI is plain `tkinter`; the theme comes from `sv-ttk` (Windows 11 look). Without `sv-ttk` the app still runs — it just falls back to the stock system theme.
 
 ## Installation
 
@@ -151,19 +151,24 @@ Other behaviour:
 - Every plan row shows its sequence, trigger, state (`pending` / `done` / `disabled` / `expired`), next fire, and the last result.
 - Select a plan and press **Edit** (or double-click) to change anything; saving re-computes the next fire time and re-enables the plan if there is a future one.
 
-### 5. Tune execution
+### 5. Settings
+
+Settings live in a **tab next to "Execute"** at the top of the window — not a modal dialog, and they no longer take up room on the main page:
 
 | Setting | Meaning |
 |---|---|
 | Step delay (s) | Fixed pause between two actions. Use **≥ 1.5** for prompts that trigger network work. |
 | Wait after activate (s) | Extra settle time after bringing the window to the foreground. |
-| Input mode | Shown read-only here — it now belongs to the app profile. |
 | Screenshot after run | Saves a PNG to `data/shots/`. |
 | Wake system before run | Uses a waitable timer to wake the machine ~90 s early. |
 | Minimise to tray on close | Closing the window keeps the scheduler alive in the tray. |
 | Start with Windows | Writes a value to `HKCU\...\CurrentVersion\Run`. |
+| Dark UI | Requires `sv-ttk`; the checkbox is greyed out without it. |
+| Data / log folder | Opens the folder directly — copy the data folder to move machines. |
 
-Application-specific settings (input mode, clearing, send key) moved into profiles; what is left here is rhythm and system behaviour, which is genuinely global.
+Every change is saved as you make it: there is **no Save / Cancel**, and switching back to "Execute" picks it up immediately.
+
+Application-specific settings (input mode, clearing, send key) live in **profiles** — the "Target app" row on the main page shows what the current profile uses. Settings only holds rhythm and system behaviour, which is genuinely global.
 
 Once configured, leave AutoStep in the tray. Tray menu: **Show window**, **Run current sequence**, **Quit**.
 
@@ -180,7 +185,15 @@ core/executor.py      action replay: click / Unicode key-by-key typing / clipboa
 core/scheduler.py     timer loop, wake arming, plan firing
 core/trigger.py       trigger model: parse, next fire time, human-readable summary
 core/store.py         JSON persistence + plan scheduling (stop date / run limit)
-core/ui.py            tkinter main window, dialogs, tray icon
+core/ui/              UI layer, split by class (it used to be one 1500-line file)
+core/ui/app.py          main window (Execute tab): step list, schedules, log, tray
+core/ui/plan_dialog.py  schedule editor
+core/ui/profile_dialog.py  app profile editor
+core/ui/calendar_dialog.py month picker
+core/ui/prompts.py      single-line / multi-line / key prompts
+core/ui/common.py       font constants
+core/ui/settings_page.py  Settings tab (execution / system / appearance / folders)
+core/ui/theme.py        theme + palette (sv-ttk, matching colors for raw tk widgets)
 core/icon.py          icon drawing (shared by tray icon and exe icon)
 tools/make_icon.py    generates assets/autostep.ico
 AutoStep.spec         PyInstaller build configuration
@@ -213,6 +226,7 @@ From source these live in the project folder; with the packaged exe they live ne
 .venv\Scripts\python.exe tests\smoke.py         # core logic + profile migration + Win32 layer (45 checks)
 .venv\Scripts\python.exe tests\integration.py   # real click / CJK input, incl. a profile-driven pass (~12 s of mouse control)
 .venv\Scripts\python.exe tests\schedule_e2e.py  # full scheduled run: fire → activate → click → type → send (~10 s of mouse control)
+.venv\Scripts\python.exe tests\ui_settings_tab.py # Settings is a sibling tab, changes save immediately (10 checks)
 ```
 
 `tests/ui_shot.py`, `tests/ui_profile_shot.py` and `tests/dialog_shot.py` render the window and dialogs to PNGs in `data/shots/` for layout review. `ui_profile_shot.py` uses a throwaway store, so it never touches your real `data/store.json`.

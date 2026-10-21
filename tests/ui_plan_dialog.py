@@ -15,6 +15,7 @@ from core import ui, winsys  # noqa: E402
 winsys.set_dpi_awareness()
 
 SEQ = {"测试workbuddy（3 步）": "abc12345"}
+DAY_BTN = (ttk.Checkbutton, tk.Checkbutton)   # 星期按钮：主题包在时装 ttk，退回时是 tk
 results = []
 
 
@@ -56,6 +57,16 @@ def time_entries(win):
 
 
 def run_steps(root):
+    try:
+        _steps(root)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        check("交互流程跑完", False, f"{type(e).__name__}: {e}")
+        root.quit()
+
+
+def _steps(root):
     win = [w for w in root.winfo_children() if isinstance(w, tk.Toplevel)][0]
     root.update()
     width0 = win.winfo_width()
@@ -68,12 +79,12 @@ def run_steps(root):
     check("加一个时刻 → 变成三行、说明写 3 次",
           len(time_entries(win)) == 3 and "一天 3 次" in summary(win), summary(win))
 
-    find(win, tk.Checkbutton, "三").invoke()
+    find(win, DAY_BTN, "三").invoke()
     root.update()
     check("点星期三 → 说明改成每周三", summary(win).startswith("每周三的"), summary(win))
 
-    find(win, tk.Checkbutton, "三").invoke()
-    find(win, tk.Checkbutton, "一").invoke()
+    find(win, DAY_BTN, "三").invoke()
+    find(win, DAY_BTN, "一").invoke()
     root.update()
     check("取消三、改点一 → 说明只剩每周一", summary(win).startswith("每周一的"), summary(win))
 
@@ -110,12 +121,10 @@ root = tk.Tk()
 root.geometry("600x600+0+0")
 root.configure(bg="white")
 root.update()
-style = ttk.Style()
-try:
-    style.theme_use("vista")
-except Exception:
-    pass
-style.configure(".", font=ui.FONT)
+from core.ui import theme  # noqa: E402
+
+theme.apply("light")          # 装了 sv-ttk 就用它，没装自动退回系统主题
+ttk.Style().configure(".", font=ui.FONT)
 
 root.after(700, lambda: run_steps(root))
 ui.PlanDialog.ask(root, SEQ, "abc12345",

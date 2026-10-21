@@ -40,7 +40,7 @@ jobs:
       - name: Compile check
         run: |
           python -m compileall -q core main.py tools
-          python -c "import core.config, core.profile, core.trigger, core.store, core.executor, core.scheduler, core.icon; print('imports ok')"
+          python -c "import core.config, core.profile, core.trigger, core.store, core.executor, core.scheduler, core.icon, core.ui; print('imports ok')"
           python tests/trigger_test.py
           python tests/frozen_paths.py
 

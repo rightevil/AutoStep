@@ -3,3 +3,4 @@ Pillow>=10.0.0
 pywin32>=306
 pyperclip>=1.8.2
 pystray>=0.19.5
+sv-ttk>=2.6          # 界面主题（Win11 风格），没装会退回系统主题

@@ -5,14 +5,18 @@
     pyinstaller --noconfirm --clean AutoStep.spec
 """
 
+from PyInstaller.utils.hooks import collect_data_files
+
 a = Analysis(
     ["main.py"],
     pathex=[],
     binaries=[],
-    # ico 只在构建时给 exe 用，运行时图标由 core/icon.py 现画，无需打进包内
-    datas=[],
+    # ico 只在构建时给 exe 用，运行时图标由 core/icon.py 现画，无需打进包内。
+    # sv-ttk 的主题是 tcl 文件 + 雪碧图，静态分析扫不到，必须收集数据文件
+    datas=collect_data_files("sv_ttk"),
     hiddenimports=[
         "pystray._win32",  # pystray 动态导入后端，静态分析扫不到
+        "sv_ttk",          # 主题包在函数里按需导入，显式声明更稳妥
         "PIL._tkinter_finder",
     ],
     hookspath=[],

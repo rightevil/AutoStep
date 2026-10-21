@@ -46,6 +46,6 @@ with mss.mss() as sct:
     mss.tools.to_png(shot.rgb, shot.size, output=str(out))
 print("saved", out)
 
-root.destroy()
+app._quit()   # 托盘能起来时必须走这条，否则 pystray 线程会把进程挂住
 for p in (tmp_store, tmp_prof):
     p.unlink(missing_ok=True)
