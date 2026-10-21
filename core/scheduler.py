@@ -13,6 +13,11 @@ from .store import Store, parse_dt
 
 EventFn = Callable[[str, Any], None]
 
+# 迟到超过这么久就算「错过」，跳过本次等下一个周期（关过机、睡过头、锁屏失败都走这里）
+MISS_GRACE = 300.0
+# 没有待执行计划时的兜底巡检间隔：手改 store.json 也能在 5 分钟内生效
+IDLE_SLEEP = 300.0
+
 
 class Scheduler:
     def __init__(self, store: Store, on_event: Optional[EventFn] = None):
@@ -20,6 +25,7 @@ class Scheduler:
         self.on_event = on_event or (lambda k, p: None)
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
+        self._wake = threading.Event()   # 计划变动时打断休眠，立刻重算
         self._running = threading.Lock()
         self._awake = False
         self._last_arm_key = ""
@@ -36,6 +42,7 @@ class Scheduler:
 
     def stop(self) -> None:
         self._stop.set()
+        self._wake.set()
         winsys.cancel_wake_timer()
         if self._awake:
             winsys.keep_awake(False)
@@ -56,7 +63,8 @@ class Scheduler:
     # ---------------- 唤醒定时器 ----------------
 
     def rearm(self) -> None:
-        """按最近一次计划重设系统唤醒定时器。"""
+        """按最近一次计划重设系统唤醒定时器，并叫醒调度线程重算。"""
+        self._wake.set()
         if not self.store.settings.get("wake_before_run", True):
             winsys.cancel_wake_timer()
             return
@@ -84,35 +92,49 @@ class Scheduler:
     def _loop(self) -> None:
         while not self._stop.is_set():
             try:
-                self._tick()
+                delay = self._tick()
             except Exception:
                 self._log("调度异常:\n" + traceback.format_exc())
-            self._stop.wait(1.0)
+                delay = 10.0
+            # 睡到下一个需要动作的时刻；计划变动 / 退出会 set 事件立即打断
+            self._wake.wait(delay)
+            self._wake.clear()
 
-    def _tick(self) -> None:
+    def _tick(self) -> float:
+        """跑一次检查，返回距离下一次需要醒来的秒数。"""
         now = datetime.now()
         lead = int(self.store.settings.get("wake_lead_seconds", 90))
+        fires = self.store.next_fires()
 
         # 临近触发或正在执行 → 阻止系统休眠（绑定在本线程上）
-        near = False
-        for item in self.store.next_fires():
-            delta = (item["dt"] - now).total_seconds()
-            if -30 <= delta <= lead:
-                near = True
-                break
+        near = any(-30 <= (it["dt"] - now).total_seconds() <= lead for it in fires)
         want_awake = near or self._running.locked()
         if want_awake != self._awake:
             winsys.keep_awake(want_awake)
             self._awake = want_awake
 
         if self._running.locked():
-            return
+            return 5.0
 
-        for item in list(self.store.next_fires()):
+        for item in fires:
+            if item["dt"] > now:
+                continue
             plan = item["plan"]
-            if item["dt"] <= now:
-                self._run_plan(plan, overdue=(now - item["dt"]).total_seconds())
-                break
+            overdue = (now - item["dt"]).total_seconds()
+            if overdue > MISS_GRACE:
+                # 用户要的是「跳过」，补跑可能连着打好几次
+                self.store.skip_plan(plan, f"错过（迟 {overdue / 60:.0f} 分钟）")
+                self._log(f"计划「{plan.get('name')}」错过 {overdue / 60:.0f} 分钟，跳过本次")
+                self._emit("refresh", None)
+                return 1.0
+            self._run_plan(plan, overdue=overdue)
+            return 0.0
+
+        if not fires:
+            return IDLE_SLEEP
+        delta = (fires[0]["dt"] - now).total_seconds()
+        # 进「防休眠窗口」的那一刻和触发时刻，取更早的那个醒来
+        return min(delta - lead, IDLE_SLEEP) if delta > lead else max(0.5, delta)
 
     # ---------------- 执行 ----------------
 

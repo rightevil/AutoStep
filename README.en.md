@@ -26,7 +26,7 @@ Asking an AI coding agent the same thing every night (a nightly refactor prompt,
 | **Key actions** | `enter`, `ctrl+enter`, `tab`, arrows, and arbitrary `ctrl+shift+x` style combos. |
 | **DPI-safe coordinates** | Positions are stored as *percentages of the window's client area*, so moving, resizing or maximising the window never shifts the click. |
 | **Multiple sequences** | Keep several action sets, rename them, share one sequence between many schedules. |
-| **Editable schedules** | Name, date (with a month-view picker), time, once / daily, and which sequence to run. Every plan is re-scheduled automatically after editing. |
+| **Three kinds of trigger** | Once; fixed time points that repeat daily or on chosen weekdays; every N hours / days. Several time points in one plan become an ordered daily series. A live summary line in the dialog spells out exactly what the current setting will do. Every plan is re-scheduled automatically after editing. |
 | **Sleep-aware** | Arms a waitable timer to wake the system ~90 s before a run, plus a wall-clock catch-up check. |
 | **Evidence** | Each run appends to a daily log and can save a screenshot of the final state. |
 | **Tray residence** | Closing the window hides it to the tray; optional start-with-Windows via the `Run` registry key. |
@@ -131,23 +131,25 @@ To add another independent set of actions, use **New** in the sequence row. Rena
 
 ### 4. Create a schedule
 
-Click **+ New plan**:
+Click **+ New plan**: name, trigger, stop condition, and which sequence to run.
 
-| Field | Notes |
-|---|---|
-| Name | Free text, e.g. `nightly refactor` |
-| Date | Read-only field plus a **📅 Select** button that opens a month calendar (with a "Today" shortcut) |
-| Time | Hour / minute dropdowns, still editable by hand |
-| Repeat | **Once** or **Every day at the same time** |
-| Sequence | Which recorded action set to run |
+Pick one trigger:
 
-Scheduling semantics are deliberately dumb — AutoStep only does what you configured:
+| Trigger | How you set it | Behaviour |
+|---|---|---|
+| **Fixed times** | One or more time points, plus weekdays (none ticked = every day) | Two or more time points become a *time series*: all of them run the same sequence, in order, within the day |
+| **Every N hours / days** | A number, a unit, and a start point | Fires at start + k×N. If the machine wakes after several missed cycles, only the most recent one runs — no burst |
+| **Once** | A date and a time | Fires once, then the plan is marked *done*. The record is **kept**, and you can re-enable it manually |
 
-- **Once** — fires at the given moment, then the plan is marked *done* and will not fire again. The record is **kept**, never deleted; re-enable it manually if you want another run.
-- **Every day** — fires once per day at the given time. Days that were missed (machine off, asleep) are **not** back-filled, so you never get a burst of catch-up runs.
-- The date/time you typed is never rewritten by the app.
-- Every plan row shows the sequence it uses, its state (`pending` / `done` / `disabled` / `expired`), next fire time, and the result of the last run.
-- Select a plan and press **Edit** (or double-click) to change anything; saving re-computes the next fire time and re-enables the plan if the new time is in the future.
+Example: time points `09:00`, `13:30`, `21:00` with no weekday ticked → that sequence runs three times a day. Tick Mon/Wed/Fri → it runs three times on those days only.
+
+**Stop condition** (leave empty = unlimited): stop after a date, or after N runs. The plan switches itself off when reached; the record stays.
+
+Other behaviour:
+
+- **Late means skipped**: if a fire could not run (machine off, locked screen, app not running) and it is more than 5 minutes late, AutoStep skips it and waits for the next cycle instead of firing a burst. The log says `missed by N minutes, skipped`.
+- Every plan row shows its sequence, trigger, state (`pending` / `done` / `disabled` / `expired`), next fire, and the last result.
+- Select a plan and press **Edit** (or double-click) to change anything; saving re-computes the next fire time and re-enables the plan if there is a future one.
 
 ### 5. Tune execution
 
@@ -176,7 +178,8 @@ core/winsys.py        window enumeration/activation, coordinate mapping, sleep p
 core/capture.py       client-area screenshot + translucent drag-to-select overlay
 core/executor.py      action replay: click / Unicode key-by-key typing / clipboard paste / combos
 core/scheduler.py     timer loop, wake arming, plan firing
-core/store.py         JSON persistence + next-fire computation
+core/trigger.py       trigger model: parse, next fire time, human-readable summary
+core/store.py         JSON persistence + plan scheduling (stop date / run limit)
 core/ui.py            tkinter main window, dialogs, tray icon
 core/icon.py          icon drawing (shared by tray icon and exe icon)
 tools/make_icon.py    generates assets/autostep.ico

@@ -4,11 +4,12 @@ from __future__ import annotations
 import json
 import os
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from . import profile as profile_mod
+from . import trigger as trigger_mod
 from .config import DEFAULT_SETTINGS, STORE_PATH
 
 DT_FMT = "%Y-%m-%d %H:%M"
@@ -32,6 +33,26 @@ def parse_dt(s: str) -> Optional[datetime]:
 
 def new_id() -> str:
     return uuid.uuid4().hex[:8]
+
+
+def _int(value: Any) -> int:
+    try:
+        return max(0, int(value or 0))
+    except Exception:
+        return 0
+
+
+def _trigger_from(trigger: Any, run_at: Any = None, repeat: Any = None) -> Dict[str, Any]:
+    """新结构优先；老字段（run_at + repeat）转成等价结构，兼容旧数据与旧调用方。"""
+    t = trigger_mod.normalize(trigger)
+    if t:
+        return t
+    dt = parse_dt(str(run_at or ""))
+    if dt is None:
+        return {}
+    if repeat == "daily":
+        return {"kind": "calendar", "times": [dt.strftime("%H:%M")], "days": []}
+    return {"kind": "once", "at": dt.strftime(DT_FMT)}
 
 
 class Store:
@@ -74,6 +95,7 @@ class Store:
             self.data["sequences"].append({"id": new_id(), "name": "默认序列", "steps": []})
         self._load_profiles()
         self._migrate_profiles()
+        self._migrate_plans()
         self.save()
 
     def _load_profiles(self) -> None:
@@ -120,6 +142,18 @@ class Store:
                 )
         for seq in missing:
             seq["profile_id"] = pid
+
+    def _migrate_plans(self) -> None:
+        """老计划只有 run_at/repeat：补出 trigger 与结束条件字段。
+
+        run_at/repeat 保留不删——万一回退旧版本，那边还能读到时间。
+        """
+        for p in self.data["plans"]:
+            if not p.get("trigger"):
+                p["trigger"] = _trigger_from(None, p.get("run_at"), p.get("repeat"))
+            p.setdefault("end_at", "")
+            p.setdefault("max_runs", 0)
+            p.setdefault("runs", 0)
 
     def save(self) -> None:
         tmp = self.path.with_suffix(".tmp")
@@ -240,8 +274,11 @@ class Store:
             "id": new_id(),
             "name": kwargs.get("name") or "未命名计划",
             "seq_id": kwargs["seq_id"],
-            "run_at": kwargs["run_at"],          # "YYYY-MM-DD HH:MM"
-            "repeat": kwargs.get("repeat", "none"),  # none | daily
+            # 触发规则见 core/trigger.py：once / calendar / interval
+            "trigger": _trigger_from(kwargs.get("trigger"), kwargs.get("run_at"), kwargs.get("repeat")),
+            "end_at": str(kwargs.get("end_at") or "")[:10],  # 截止日期，空=不限
+            "max_runs": _int(kwargs.get("max_runs")),        # 最多执行次数，0=不限
+            "runs": 0,
             "enabled": True,
             "status": "idle",                    # idle | done（done 只表示跑过了，记录仍保留）
             "next_fire": "",
@@ -265,17 +302,21 @@ class Store:
         self,
         plan_id: str,
         name: str,
-        run_at: str,
-        repeat: str,
-        seq_id: str,
+        run_at: str = "",
+        repeat: str = "none",
+        seq_id: str = "",
+        trigger: Any = None,
+        end_at: Any = "",
+        max_runs: Any = 0,
     ) -> Optional[Dict[str, Any]]:
         """编辑计划。改完时间/重复方式后重新排期，若新时间有效则自动恢复启用。"""
         p = self.get_plan(plan_id)
         if not p:
             return None
         p["name"] = (name or "").strip() or p.get("name", "未命名计划")
-        p["run_at"] = run_at
-        p["repeat"] = repeat if repeat in ("none", "daily") else "none"
+        p["trigger"] = _trigger_from(trigger, run_at, repeat)
+        p["end_at"] = str(end_at or "")[:10]
+        p["max_runs"] = _int(max_runs)
         if seq_id and self.get_sequence(seq_id):
             p["seq_id"] = seq_id
         p["status"] = "idle"
@@ -297,17 +338,21 @@ class Store:
 
     @staticmethod
     def _compute_next_fire(plan: Dict[str, Any], ref: datetime) -> str:
-        """计算下一次该触发的时刻；已失效返回空串。"""
-        base = parse_dt(plan.get("run_at", ""))
-        if base is None:
+        """下一次触发时刻；没有下一次（过期/次数用尽/过截止日）返回空串。
+
+        end_at / max_runs 目前界面上不提供入口——「每天跑」配「最多 N 次」自相矛盾，
+        新建计划时一律留空。这里保留判断只是为了兼容早期数据，没有值就不生效。
+        """
+        nxt = trigger_mod.next_fire(plan.get("trigger"), ref)
+        if nxt is None:
             return ""
-        if plan.get("repeat") == "daily":
-            cand = ref.replace(hour=base.hour, minute=base.minute, second=0, microsecond=0)
-            if cand <= ref:
-                cand += timedelta(days=1)
-            return cand.strftime(DT_FMT)
-        # 一次性
-        return base.strftime(DT_FMT) if base > ref else ""
+        end_at = str(plan.get("end_at") or "")
+        if end_at and nxt.strftime("%Y-%m-%d") > end_at:
+            return ""
+        limit = _int(plan.get("max_runs"))
+        if limit and _int(plan.get("runs")) >= limit:
+            return ""
+        return nxt.strftime(DT_FMT)
 
     def refresh_plan(self, plan: Dict[str, Any]) -> None:
         """保存后重算 next_fire。"""
@@ -317,22 +362,31 @@ class Store:
             plan["next_fire"] = self._compute_next_fire(plan, now())
         self.save()
 
+    def skip_plan(self, plan: Dict[str, Any], status: str = "错过（超时未执行）") -> None:
+        """跳过本次：不计入执行次数，只把下次触发往后排。"""
+        plan["last_status"] = status
+        nxt = self._compute_next_fire(plan, now())
+        plan["next_fire"] = nxt
+        if not nxt:
+            plan["enabled"] = False
+        self.save()
+
     def mark_plan_done(self, plan: Dict[str, Any], status: str) -> None:
         plan["last_run"] = now_str()
         plan["last_status"] = status
         plan["status"] = "done"
-        if plan.get("repeat") == "daily":
-            # 每天执行：下一次仍旧是「同一时刻」，只是日期往后一天。
-            # 跨过漏执行的日期不补跑，直接落到未来最近的一次。
-            base = parse_dt(plan.get("next_fire", "")) or parse_dt(plan.get("run_at", "")) or now()
-            nxt = base + timedelta(days=1)
-            cur = now()
-            while nxt <= cur:
-                nxt += timedelta(days=1)
-            plan["next_fire"] = nxt.strftime(DT_FMT) if plan.get("enabled") else ""
-        else:
-            # 只执行一次：跑完就结束，计划记录保留不删
-            plan["next_fire"] = ""
+        plan["runs"] = _int(plan.get("runs")) + 1
+        # 从「本次该触发的时刻」往后排，而不是从现在：否则一次性计划跑完还会算作未来有效
+        ref = parse_dt(plan.get("next_fire", "")) or now()
+        kind = str((plan.get("trigger") or {}).get("kind"))
+        # 一次性计划跑过就收摊。不靠 ref 推断：手改过 store.json 时 next_fire 可能和 trigger 对不上
+        nxt = "" if kind == "once" else self._compute_next_fire(plan, ref)
+        if nxt and parse_dt(nxt) <= now():
+            # 延迟执行时，按计划时刻推出来的下一次可能已经过去了，退回到从此刻重算
+            nxt = self._compute_next_fire(plan, now())
+        plan["next_fire"] = nxt
+        if not nxt:
+            # 一次性 / 次数用尽 / 过截止日期：跑完收摊，记录保留不删
             plan["enabled"] = False
         self.save()
 

@@ -73,7 +73,7 @@ check("重命名空字符串被拒绝", st.rename_plan(p3["id"], "   ") is False
 later = (datetime.now() + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M")
 up = st.update_plan(p3["id"], "编辑后的计划", later, "none", seq["id"])
 check("编辑后名称生效", up["name"] == "编辑后的计划")
-check("编辑后时间生效", up["run_at"] == later)
+check("编辑后时间生效", up["trigger"]["at"] == later)
 check("编辑后改回一次性并重新启用", up["enabled"] is True and up["next_fire"] == later,
       f"{up['enabled']} {up['next_fire']}")
 check("编辑后排期恢复待执行状态", up["status"] == "idle")

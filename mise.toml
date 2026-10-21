@@ -1,10 +1,14 @@
 [tools]
 python = "3.13"
 
+# Windows 上 mise 通过 cmd.exe 执行 run，路径必须用反斜杠；
+# 正斜杠会被 cmd 当成参数开关拆开，报「'.venv' 不是内部或外部命令」。
+# 单引号是 TOML 字面量字符串，里面的反斜杠不转义。
+
 [tasks.install]
 description = "创建 venv 并安装依赖"
-run = "python -m venv .venv && .venv/Scripts/python.exe -m pip install -U pip && .venv/Scripts/python.exe -m pip install -r requirements.txt"
+run = 'python -m venv .venv && .\.venv\Scripts\python.exe -m pip install -U pip && .\.venv\Scripts\python.exe -m pip install -r requirements.txt'
 
 [tasks.start]
 description = "启动应用"
-run = ".venv/Scripts/pythonw.exe main.py"
+run = '.\.venv\Scripts\pythonw.exe main.py'
