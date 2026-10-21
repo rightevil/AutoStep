@@ -6,7 +6,17 @@
 
 ---
 
-## 一、首次准备
+## 一、安装
+
+### 方式 A：直接下载 exe（不用装 Python）
+
+到 [Releases](https://github.com/rightevil/AutoStep/releases) 下载 `AutoStep-*-win64.zip`，解压到任意**可写**目录（别放 `C:\Program Files` 下），双击 `AutoStep.exe` 即可。
+
+- 单文件、无控制台窗口，不依赖 Python 环境；
+- 首次运行会在 exe 同级生成 `data/` 存序列、计划和日志；该目录不可写时自动改用 `%APPDATA%\AutoStep`；
+- 升级时用新 exe 覆盖旧的即可，`data/` 不动。
+
+### 方式 B：从源码运行
 
 ```bash
 git clone https://github.com/rightevil/AutoStep.git
@@ -15,7 +25,7 @@ mise install        # 装 Python 3.13（已在 mise.toml 里锁版本）
 mise run install    # 建 .venv + 装依赖
 ```
 
-依赖只有 5 个：mss、Pillow、pywin32、pyperclip、pystray，总共十几 MB。界面用 Python 自带的 tkinter，无需额外安装。
+依赖只有 5 个：mss、Pillow、pywin32、pyperclip、pystray，总共十几 MB。界面用 Python 自带的 tkinter，无需额外安装；打包用 PyInstaller（只有出包时需要，见 `.github/workflows/release.yml`）。
 
 ## 二、启动
 
@@ -92,7 +102,7 @@ data/logs/*.log     每日运行日志
 data/shots/*.png    执行后截图
 ```
 
-这些文件已被 `.gitignore` 忽略——里面是你的提示词和计划。
+源码运行时这些文件在项目目录下；用打包的 exe 时在 **exe 同级**（不可写则退回 `%APPDATA%\AutoStep`，实际路径写在当天日志第一行）。这些都已被 `.gitignore` 忽略——里面是你的提示词和计划。
 
 ## 八、自测
 
@@ -115,6 +125,31 @@ core/executor.py     动作回放（点击 / Unicode 逐字符 / 剪贴板粘贴
 core/scheduler.py    定时循环 + 唤醒布防
 core/store.py        JSON 持久化与下次触发时间计算
 core/ui.py           主界面、对话框、托盘图标
+core/icon.py         图标绘制（托盘与 exe 图标共用）
+tools/make_icon.py   生成 assets/autostep.ico
+AutoStep.spec        PyInstaller 打包配置
+```
+
+## 十、打包与发版
+
+推一个 `v*` tag 就会自动出包并发 Release：
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+`.github/workflows/release.yml` 在 `windows-latest` 上依次做：装依赖 → 语法与导入检查 → 按 `AutoStep.spec` 打单文件 exe → 压成 `AutoStep-<版本>-win64.zip` → 建 Release 上传。也可以在 Actions 页面手动触发 `release` 工作流并填版本号。
+
+> 托管 runner 上没有交互式桌面，所以 `tests/integration.py`、`tests/schedule_e2e.py` 这类会接管鼠标的测试不在 CI 里跑，只做编译与导入检查。
+
+本地出包（一般不需要，发版交给 Actions）：
+
+```bash
+.venv/Scripts/python.exe -m pip install "pyinstaller>=6.6"
+.venv/Scripts/python.exe tools/make_icon.py   # 重新生成 assets/autostep.ico
+.venv/Scripts/python.exe -m PyInstaller --noconfirm --clean AutoStep.spec
+# 产物：dist/AutoStep.exe
 ```
 
 ## 许可证

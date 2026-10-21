@@ -40,6 +40,16 @@ Runtime dependencies: `mss`, `Pillow`, `pywin32`, `pyperclip`, `pystray` (about 
 
 ## Installation
 
+### Option A: download the prebuilt exe (no Python needed)
+
+Grab `AutoStep-*-win64.zip` from [Releases](https://github.com/rightevil/AutoStep/releases), unpack it into any **writable** folder (not `C:\Program Files`), and double-click `AutoStep.exe`.
+
+- Single file, no console window, no Python runtime required;
+- On first launch it creates `data/` next to the exe for sequences, plans and logs; if that folder is not writable it falls back to `%APPDATA%\AutoStep`;
+- To upgrade, overwrite the exe — `data/` is left untouched.
+
+### Option B: run from source
+
 ```bash
 git clone https://github.com/rightevil/AutoStep.git
 cd AutoStep
@@ -152,6 +162,9 @@ core/executor.py      action replay: click / Unicode key-by-key typing / clipboa
 core/scheduler.py     timer loop, wake arming, plan firing
 core/store.py         JSON persistence + next-fire computation
 core/ui.py            tkinter main window, dialogs, tray icon
+core/icon.py          icon drawing (shared by tray icon and exe icon)
+tools/make_icon.py    generates assets/autostep.ico
+AutoStep.spec         PyInstaller build configuration
 ```
 
 Recorded geometry is stored relative to the window:
@@ -172,7 +185,7 @@ data/logs/*.log     one log file per day
 data/shots/*.png    post-run screenshots
 ```
 
-These are git-ignored — they contain your prompts and schedule.
+From source these live in the project folder; with the packaged exe they live next to the exe (or in `%APPDATA%\AutoStep` when that folder is read-only — the actual path is written to the first line of the day's log). All of it is git-ignored — it contains your prompts and schedule.
 
 ## Self-tests
 
@@ -192,6 +205,28 @@ These are git-ignored — they contain your prompts and schedule.
 3. **The target window must not be covered** when you record, otherwise the screenshot captures the overlapping window.
 4. **The tray process must stay alive.** Quitting stops all schedules.
 5. Windows-only by design; the Win32 calls in `core/winsys.py` and `core/executor.py` have no cross-platform fallback.
+
+## Building a release
+
+Pushing a `v*` tag builds and publishes everything on GitHub — no local build required:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+`.github/workflows/release.yml` runs on `windows-latest`: install dependencies → compile and import check → PyInstaller with `AutoStep.spec` → zip as `AutoStep-<version>-win64.zip` → create the GitHub Release and attach the zip. The same workflow can be triggered manually from the Actions tab with a version input.
+
+> Hosted runners have no interactive desktop, so `tests/integration.py` and `tests/schedule_e2e.py` (which take over the mouse) are not run in CI — only compile and import checks.
+
+Local build, if you ever need one:
+
+```bash
+.venv\Scripts\python.exe -m pip install "pyinstaller>=6.6"
+.venv\Scripts\python.exe tools\make_icon.py            # regenerates assets/autostep.ico
+.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean AutoStep.spec
+# output: dist\AutoStep.exe
+```
 
 ## License
 
