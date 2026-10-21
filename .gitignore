@@ -8,6 +8,11 @@ venv/
 # Runtime data (action sequences, plans, logs, screenshots)
 data/
 
+# Test scratch files (stores/profiles created during test runs)
+tests/_tmp*.json
+tests/_ui_store.json
+tests/profiles.json
+
 # PyInstaller output
 build/
 dist/

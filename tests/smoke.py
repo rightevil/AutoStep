@@ -94,6 +94,102 @@ st.remove_sequence(seq["id"])
 check("删序列后相关计划被清理", len(st.plans) == 0 and len(st.sequences) == 1)
 tmp.unlink(missing_ok=True)
 
+print("\n== 1b. 应用档案（profile）==")
+import json  # noqa: E402
+
+from core import profile as profile_mod  # noqa: E402
+
+tmp2 = Path(__file__).parent / "_tmp_store2.json"
+pfile = Path(__file__).parent / "_tmp_profiles2.json"
+for _p in (tmp2, pfile):
+    _p.unlink(missing_ok=True)
+
+# 伪造升级前的数据：序列没有 profile_id，目标与输入方式存在全局设置里
+tmp2.write_text(
+    json.dumps(
+        {
+            "settings": {
+                "target_process": "Notepad.exe",
+                "target_title": "",
+                "input_mode": "keys",
+                "clear_first": False,
+            },
+            "sequences": [{"id": "s1", "name": "老序列", "steps": []}],
+            "plans": [],
+        },
+        ensure_ascii=False,
+    ),
+    "utf-8",
+)
+st2 = Store(tmp2, pfile)
+check("迁移：老序列获得 profile_id", all(s.get("profile_id") for s in st2.sequences),
+      str(st2.sequences[0].get("profile_id")))
+legacy = st2.get_profile(st2.sequences[0]["profile_id"])
+check("迁移：档案沿用原全局目标", legacy["match"]["process"] == "Notepad.exe", legacy["match"]["process"])
+check("迁移：档案沿用原输入方式",
+      legacy["input"]["mode"] == "keys" and legacy["input"]["clear_first"] is False,
+      str(legacy["input"]))
+check("迁移：profiles.json 已落盘", pfile.exists())
+
+# 全新安装（store.json 本来不存在）不该生成「原设置」这种迁移产物
+fresh_store = Path(__file__).parent / "_tmp_store3.json"
+fresh_prof = Path(__file__).parent / "_tmp_profiles3.json"
+for _p in (fresh_store, fresh_prof):
+    _p.unlink(missing_ok=True)
+st4 = Store(fresh_store, fresh_prof)
+check("首次安装直接挂内置 ChatGPT 档案",
+      st4.sequences[0]["profile_id"] == "chatgpt-codex", str(st4.sequences[0]["profile_id"]))
+for _p in (fresh_store, fresh_prof):
+    _p.unlink(missing_ok=True)
+
+seq_a = st2.add_sequence("序列A")
+check("新序列自动带 profile_id", bool(seq_a.get("profile_id")), str(seq_a.get("profile_id")))
+
+wx = st2.upsert_profile(
+    {
+        "id": "wx",
+        "name": "微信",
+        "match": {"process": "WeChat", "title": ""},
+        "input": {"mode": "paste", "clear_first": False},
+        "send": {"combo": "ctrl+enter"},
+    }
+)
+seq_b = st2.add_sequence("序列B", "wx")
+check("两条序列可指向不同档案",
+      st2.get_sequence(seq_a["id"])["profile_id"] != st2.get_sequence(seq_b["id"])["profile_id"])
+check("按序列能取到各自档案",
+      (st2.sequence_profile(st2.get_sequence(seq_b["id"])) or {}).get("name") == "微信")
+
+mode, clear = profile_mod.resolve_input(wx, st2.settings)
+check("输入方式取档案值而非全局", mode == "paste" and clear is False, f"{mode} {clear}")
+check("发送键取档案值", profile_mod.resolve_send(wx) == "ctrl+enter", profile_mod.resolve_send(wx))
+check("无档案时退回全局设置", profile_mod.resolve_input(None, st2.settings) == ("keys", False))
+
+generic = st2.get_profile("generic")
+check("未配目标的档案不误点任意窗口", profile_mod.match_target(generic) == 0)
+check("has_target 能识别未配置",
+      profile_mod.has_target(generic) is False and profile_mod.has_target(wx) is True)
+check("未知 profile_id 退回通用档案", st2.get_profile("no-such-id") is not None,
+      (st2.get_profile("no-such-id") or {}).get("id"))
+
+# 手改 profiles.json 后重新加载应生效（说明它是可编辑的配置文件）
+raw = json.loads(pfile.read_text("utf-8"))
+for item in raw["profiles"]:
+    if item["id"] == "wx":
+        item["name"] = "改名了"
+pfile.write_text(json.dumps(raw, ensure_ascii=False), "utf-8")
+st3 = Store(tmp2, pfile)
+check("手改 profiles.json 后重新加载生效", st3.get_profile("wx")["name"] == "改名了",
+      st3.get_profile("wx")["name"])
+
+st3.remove_profile("wx")
+check("删除档案后相关序列改挂其他档案",
+      st3.get_sequence(seq_b["id"])["profile_id"] in st3.profiles,
+      st3.get_sequence(seq_b["id"])["profile_id"])
+
+for _p in (tmp2, pfile):
+    _p.unlink(missing_ok=True)
+
 print("\n== 2. 窗口系统层 ==")
 wins = winsys.list_windows()
 check("能枚举到窗口", len(wins) > 0, f"{len(wins)} 个")

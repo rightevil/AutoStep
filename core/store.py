@@ -8,9 +8,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from . import profile as profile_mod
 from .config import DEFAULT_SETTINGS, STORE_PATH
 
 DT_FMT = "%Y-%m-%d %H:%M"
+PROFILE_FILE = "profiles.json"
 
 
 def now() -> datetime:
@@ -33,10 +35,19 @@ def new_id() -> str:
 
 
 class Store:
-    """简单的 JSON 存储，写入用临时文件 + 替换保证原子性。"""
+    """简单的 JSON 存储，写入用临时文件 + 替换保证原子性。
 
-    def __init__(self, path: Path = STORE_PATH):
+    应用档案（profile）与序列、计划存在同一目录：
+    - <store 所在目录>/store.json     设置 / 序列 / 计划
+    - <store 所在目录>/profiles.json  应用档案（可以手改）
+    """
+
+    def __init__(self, path: Path = STORE_PATH, profile_path: Optional[Path] = None):
         self.path = Path(path)
+        self.profile_path = (
+            Path(profile_path) if profile_path else self.path.parent / PROFILE_FILE
+        )
+        self.profiles: Dict[str, Dict[str, Any]] = {}
         self.data: Dict[str, Any] = {
             "settings": {},
             "sequences": [],
@@ -48,7 +59,9 @@ class Store:
 
     def load(self) -> None:
         raw: Dict[str, Any] = {}
-        if self.path.exists():
+        # 文件是否存在决定「首次安装」还是「老数据升级」，两者给的默认档案不同
+        self._fresh = not self.path.exists()
+        if not self._fresh:
             try:
                 raw = json.loads(self.path.read_text("utf-8"))
             except Exception:
@@ -59,12 +72,63 @@ class Store:
         self.data["plans"] = raw.get("plans") or []
         if not self.data["sequences"]:
             self.data["sequences"].append({"id": new_id(), "name": "默认序列", "steps": []})
+        self._load_profiles()
+        self._migrate_profiles()
         self.save()
+
+    def _load_profiles(self) -> None:
+        disk = profile_mod.load_file(self.profile_path)
+        self.profiles = profile_mod.merge(profile_mod.BUILTIN_PROFILES, disk)
+
+    def _migrate_profiles(self) -> None:
+        """给没有 profile_id 的序列挂上档案。
+
+        - 首次安装：直接挂内置的 ChatGPT 档案（默认目标就是它）
+        - 老数据升级：用当前的全局目标生成一条「原设置」档案，
+          保证升级前后行为完全一致，用户既有序列不必重录
+        """
+        missing = [s for s in self.data["sequences"] if not s.get("profile_id")]
+        if not missing:
+            return
+        s = self.data["settings"]
+        if getattr(self, "_fresh", False):
+            pid = (
+                "chatgpt-codex"
+                if "chatgpt" in str(s.get("target_process", "")).lower()
+                and "chatgpt-codex" in self.profiles
+                else profile_mod.GENERIC_ID
+            )
+        else:
+            pid = "default"
+            if pid not in self.profiles:
+                proc = str(s.get("target_process", "")).strip()
+                self.profiles[pid] = profile_mod.normalize(
+                    {
+                        "id": pid,
+                        # 名字里带上原目标，下拉里一眼能认出来
+                        "name": f"原设置（{proc}）" if proc else "原设置",
+                        "match": {
+                            "process": proc,
+                            "title": s.get("target_title", ""),
+                        },
+                        "input": {
+                            "mode": s.get("input_mode", "auto"),
+                            "clear_first": s.get("clear_first", True),
+                        },
+                        "send": {"combo": "enter"},
+                    }
+                )
+        for seq in missing:
+            seq["profile_id"] = pid
 
     def save(self) -> None:
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(json.dumps(self.data, ensure_ascii=False, indent=2), "utf-8")
         os.replace(tmp, self.path)
+        try:
+            profile_mod.save_file(self.profile_path, self.profiles)
+        except Exception:
+            pass
 
     # ---------- 设置 ----------
 
@@ -75,6 +139,58 @@ class Store:
     def set_setting(self, key: str, value: Any) -> None:
         self.settings[key] = value
         self.save()
+
+    # ---------- 应用档案 ----------
+
+    def get_profile(self, profile_id: str = "") -> Optional[Dict[str, Any]]:
+        """按 id 取档案；找不到退回通用档案，避免整条序列跑不起来。"""
+        p = self.profiles.get(str(profile_id or ""))
+        if p:
+            return p
+        return self.profiles.get(profile_mod.GENERIC_ID) or next(
+            iter(self.profiles.values()), None
+        )
+
+    def profile_choices(self) -> List[Dict[str, Any]]:
+        """给界面下拉用：通用档案排最后。"""
+        items = sorted(
+            self.profiles.values(), key=lambda p: (p.get("id") == profile_mod.GENERIC_ID, p.get("name", ""))
+        )
+        return items
+
+    def default_profile_id(self) -> str:
+        """新序列默认用哪个档案：优先沿用当前第一条序列的选择。"""
+        for s in self.sequences:
+            pid = s.get("profile_id")
+            if pid and pid in self.profiles:
+                return pid
+        return profile_mod.GENERIC_ID if profile_mod.GENERIC_ID in self.profiles else ""
+
+    def upsert_profile(self, raw: Dict[str, Any]) -> Dict[str, Any]:
+        prof = profile_mod.normalize(raw)
+        if not prof["id"]:
+            prof["id"] = new_id()
+        self.profiles[prof["id"]] = prof
+        self.save()
+        return prof
+
+    def remove_profile(self, profile_id: str) -> bool:
+        """删档案：引用它的序列改挂默认档案，不允许把最后一条删光。"""
+        pid = str(profile_id or "")
+        if pid not in self.profiles or len(self.profiles) <= 1:
+            return False
+        del self.profiles[pid]
+        fallback = self.default_profile_id() or profile_mod.GENERIC_ID
+        for s in self.sequences:
+            if s.get("profile_id") == pid:
+                s["profile_id"] = fallback
+        self.save()
+        return True
+
+    def sequence_profile(self, seq: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not seq:
+            return None
+        return self.get_profile(seq.get("profile_id", ""))
 
     # ---------- 序列 ----------
 
@@ -91,8 +207,9 @@ class Store:
     def default_sequence(self) -> Dict[str, Any]:
         return self.sequences[0]
 
-    def add_sequence(self, name: str) -> Dict[str, Any]:
-        seq = {"id": new_id(), "name": name, "steps": []}
+    def add_sequence(self, name: str, profile_id: str = "") -> Dict[str, Any]:
+        pid = profile_id or self.default_profile_id()
+        seq = {"id": new_id(), "name": name, "profile_id": pid, "steps": []}
         self.sequences.append(seq)
         self.save()
         return seq
@@ -102,7 +219,14 @@ class Store:
         # 引用它的计划一并清理
         self.data["plans"] = [p for p in self.plans if p.get("seq_id") != seq_id]
         if not self.sequences:
-            self.data["sequences"].append({"id": new_id(), "name": "默认序列", "steps": []})
+            self.data["sequences"].append(
+                {
+                    "id": new_id(),
+                    "name": "默认序列",
+                    "profile_id": self.default_profile_id(),
+                    "steps": [],
+                }
+            )
         self.save()
 
     # ---------- 计划 ----------

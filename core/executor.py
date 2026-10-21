@@ -11,6 +11,7 @@ import win32con
 import win32gui
 
 from . import winsys
+from . import profile as profile_mod
 from .config import SHOT_DIR
 
 LogFn = Callable[[str], None]
@@ -165,7 +166,10 @@ def describe_step(i: int, step: Dict[str, Any]) -> str:
             one = one[:28] + "…"
         return f"#{i} 输入「{one}」"
     if t == "key":
-        return f"#{i} 按键 {step.get('combo','enter')}"
+        combo = step.get("combo", "enter")
+        if combo == profile_mod.SEND_ALIAS:
+            return f"#{i} 发送（应用默认键）"
+        return f"#{i} 按键 {combo}"
     return f"#{i} 未知动作"
 
 
@@ -174,13 +178,29 @@ def execute(
     settings: Dict[str, Any],
     log: LogFn = lambda m: None,
     hwnd_hint: int = 0,
+    profile: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """按顺序回放。返回 {ok, message, shot}。"""
-    hwnd = winsys.find_target(
-        settings.get("target_process", ""), settings.get("target_title", ""), hwnd_hint
-    )
+    """按顺序回放。返回 {ok, message, shot}。
+
+    profile 为序列所属的应用档案：目标窗口、输入方式、发送键都从它来；
+    传 None 时退回全局 settings 的老行为。
+    """
+    if profile is not None:
+        if not profile_mod.has_target(profile):
+            return {
+                "ok": False,
+                "message": f"档案「{profile.get('name', '')}」还没设置目标窗口，跳过本次",
+                "shot": "",
+            }
+        hwnd = profile_mod.match_target(profile, hwnd_hint)
+        who = profile_mod.describe(profile)
+    else:
+        hwnd = winsys.find_target(
+            settings.get("target_process", ""), settings.get("target_title", ""), hwnd_hint
+        )
+        who = "全局目标"
     if not hwnd:
-        return {"ok": False, "message": "没找到目标窗口（ChatGPT / Codex），跳过本次", "shot": ""}
+        return {"ok": False, "message": f"没找到目标窗口（{who}），跳过本次", "shot": ""}
     info = winsys.window_info(hwnd)
     log(f"目标窗口: {info['process']} · {info['title']}")
 
@@ -198,7 +218,7 @@ def execute(
         return {"ok": False, "message": "窗口激活后又被抢走焦点", "shot": ""}
 
     delay = float(settings.get("step_delay", 1.0))
-    mode = settings.get("input_mode", "auto")
+    mode, clear_first = profile_mod.resolve_input(profile, settings)
 
     for idx, step in enumerate(steps, 1):
         time.sleep(delay)
@@ -220,15 +240,19 @@ def execute(
             if pt:
                 click_at(*pt)
                 time.sleep(0.25)
-            if settings.get("clear_first", True) and step.get("clear_first", True):
+            if clear_first and step.get("clear_first", True):
                 send_combo("ctrl+a")
                 time.sleep(0.08)
             how = type_text(step.get("text", ""), mode)
             log(f"{describe_step(idx, step)} [{how}]")
         elif t == "key":
             combo = step.get("combo", "enter")
+            if combo == profile_mod.SEND_ALIAS:
+                combo = profile_mod.resolve_send(profile)
+                log(f"{describe_step(idx, step)} -> {combo}")
+            else:
+                log(describe_step(idx, step))
             send_combo(combo)
-            log(f"{describe_step(idx, step)}")
         else:
             log(f"第 {idx} 步类型未知，忽略: {t}")
 

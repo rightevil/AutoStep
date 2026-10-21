@@ -2,7 +2,7 @@
 
 **Record mouse clicks and text input once, then replay them on a schedule — unattended, in the background.**
 
-AutoStep is a small Windows tray application built for driving the **Codex** panel inside the ChatGPT desktop app on a timer. You record a sequence of actions (click a region, type a prompt, press Enter), attach that sequence to a schedule, and AutoStep stays quietly in the system tray until the scheduled moment, then performs the whole sequence on the live window.
+AutoStep is a small Windows tray application for driving AI desktop apps on a timer. It ships knowing the **Codex** panel inside the ChatGPT desktop app, but the target is configurable: each sequence carries an **app profile** describing how to find that application's window, how to type into it and which key sends. You record a sequence of actions (click a region, type a prompt, press Send), attach that sequence to a schedule, and AutoStep stays quietly in the system tray until the scheduled moment, then performs the whole sequence on the live window.
 
 English | [简体中文](README.md)
 
@@ -21,6 +21,7 @@ Asking an AI coding agent the same thing every night (a nightly refactor prompt,
 | | |
 |---|---|
 | **Region recording** | Click actions are captured by dragging a box over a live screenshot of the target window — no coordinate guessing. |
+| **App profiles** | Each sequence owns a profile: which window to match, how to type, which key sends. One instance can drive several applications, and switching apps means editing a JSON entry rather than the code. |
 | **Text input with CJK support** | Pure-ASCII text is typed key by key; anything containing non-ASCII is pasted through the clipboard (original clipboard content is restored). |
 | **Key actions** | `enter`, `ctrl+enter`, `tab`, arrows, and arbitrary `ctrl+shift+x` style combos. |
 | **DPI-safe coordinates** | Positions are stored as *percentages of the window's client area*, so moving, resizing or maximising the window never shifts the click. |
@@ -94,12 +95,24 @@ While debugging, use `python` instead of `pythonw` so tracebacks land in the ter
 
 A normal window opens. Closing it minimises AutoStep to the tray by default and scheduling continues; the tray icon's context menu offers **Show window**, **Run current sequence** and **Quit**. To launch straight into the background from a shortcut, point it at `pythonw.exe` with `main.py`, or tick **Start with Windows** in the UI.
 
-### 2. Pick the target window
+### 2. Pick the app profile
 
-AutoStep defaults to the process **`ChatGPT`** — the Codex panel lives inside the ChatGPT desktop app, and its window title changes, so it is matched by process name only.
+Every sequence carries an **app profile** — the knowledge of how to talk to that one application: how to find its window, how to type into it, and which key sends. That is what lets one instance drive several apps without them interfering.
 
-- **Refresh** — re-enumerate windows (a dropdown of `process — title`).
-- **Check** — confirm a window matches and show its client-area size. A green `✓` means the handle is valid.
+| Field | Meaning |
+|---|---|
+| Name | A label, for you |
+| Process | Substring match — `ChatGPT` matches `ChatGPT.exe` |
+| Title contains (optional) | Disambiguates several windows of the same process |
+| Input mode | `auto` (ASCII → keystrokes, non-ASCII → clipboard paste), `keys` (force per-character), `paste` (force clipboard) |
+| Clear with Ctrl+A first | Prevents appending to leftover text |
+| Send key | `enter` / `ctrl+enter` … used by the **+ Send** action |
+
+- **New profile** — fill the form, or bring the app to the front and pick it from **Pick from window list**; AutoStep writes that window's process name into the current profile.
+- **Switch profile** — the dropdown at the top only changes the **currently selected sequence**; other sequences keep their own.
+- Profiles live in `data/profiles.json`, plain JSON you can edit, back up or share.
+
+> Upgrading from an older build: the old global target becomes a profile called “原设置” attached to your existing sequences, so nothing has to be re-recorded.
 
 ### 3. Record actions
 
@@ -109,7 +122,8 @@ A *sequence* is an ordered list of actions; top-to-bottom is the execution order
 |---|---|
 | **+ Click** | Activates the target window, grabs a screenshot of its client area, and overlays a translucent selector. **Drag a box** over the spot to click; release to record. `Esc` or right-click cancels. |
 | **+ Type** | Same region selection (pick the input box), then a dialog for the text to send — multi-line and mixed Chinese/English are fine. "Clear with Ctrl+A first" is enabled by default. |
-| **+ Key** | Sends a keystroke or combo, e.g. `enter`, `ctrl+enter`. **Do not forget this step** — typing a prompt without sending it does nothing. |
+| **+ Send** | Sends the profile's send key (default `enter`). **Do not forget this step** — typing a prompt without sending it does nothing. |
+| **+ Key** | Sends an explicit keystroke or combo, e.g. `tab`, `ctrl+a`. |
 
 Reorder with **Up / Down**, tweak an entry with **Edit** (double-click a row), remove with **Delete**. Use **Run once now** to rehearse the sequence immediately; watch the log pane at the bottom.
 
@@ -141,12 +155,13 @@ Scheduling semantics are deliberately dumb — AutoStep only does what you confi
 |---|---|
 | Step delay (s) | Fixed pause between two actions. Use **≥ 1.5** for prompts that trigger network work. |
 | Wait after activate (s) | Extra settle time after bringing the window to the foreground. |
-| Input mode | `auto` (ASCII → keystrokes, non-ASCII → clipboard paste), `keys` (force per-character), `paste` (force clipboard). |
-| Clear with Ctrl+A first | Prevents appending to leftover text. |
+| Input mode | Shown read-only here — it now belongs to the app profile. |
 | Screenshot after run | Saves a PNG to `data/shots/`. |
 | Wake system before run | Uses a waitable timer to wake the machine ~90 s early. |
 | Minimise to tray on close | Closing the window keeps the scheduler alive in the tray. |
 | Start with Windows | Writes a value to `HKCU\...\CurrentVersion\Run`. |
+
+Application-specific settings (input mode, clearing, send key) moved into profiles; what is left here is rhythm and system behaviour, which is genuinely global.
 
 Once configured, leave AutoStep in the tray. Tray menu: **Show window**, **Run current sequence**, **Quit**.
 
@@ -155,6 +170,7 @@ Once configured, leave AutoStep in the tray. Tray menu: **Show window**, **Run c
 ```
 main.py               entry point: per-monitor DPI awareness, single-instance mutex, UI start
 core/config.py        paths, default settings, app identity (single source for APP_NAME / APP_ID)
+core/profile.py       app profiles: window matching / input mode / send key / reserved verify hook
 core/winsys.py        window enumeration/activation, coordinate mapping, sleep prevention,
                       waitable-timer wake, lock-screen detection
 core/capture.py       client-area screenshot + translucent drag-to-select overlay
@@ -181,6 +197,7 @@ Recorded geometry is stored relative to the window:
 
 ```
 data/store.json     sequences, plans and settings
+data/profiles.json  app profiles (hand-editable)
 data/logs/*.log     one log file per day
 data/shots/*.png    post-run screenshots
 ```
@@ -190,12 +207,12 @@ From source these live in the project folder; with the packaged exe they live ne
 ## Self-tests
 
 ```bash
-.venv\Scripts\python.exe tests\smoke.py         # core logic + Win32 layer (29 checks)
-.venv\Scripts\python.exe tests\integration.py   # real click / CJK input against a scratch window (~5 s of mouse control)
-.venv\Scripts\python.exe tests\schedule_e2e.py  # full scheduled run: fire → activate → click → type → send (~8 s of mouse control)
+.venv\Scripts\python.exe tests\smoke.py         # core logic + profile migration + Win32 layer (45 checks)
+.venv\Scripts\python.exe tests\integration.py   # real click / CJK input, incl. a profile-driven pass (~12 s of mouse control)
+.venv\Scripts\python.exe tests\schedule_e2e.py  # full scheduled run: fire → activate → click → type → send (~10 s of mouse control)
 ```
 
-`tests/ui_shot.py` and `tests/dialog_shot.py` render the window and dialogs to PNGs in `data/shots/` for layout review.
+`tests/ui_shot.py`, `tests/ui_profile_shot.py` and `tests/dialog_shot.py` render the window and dialogs to PNGs in `data/shots/` for layout review. `ui_profile_shot.py` uses a throwaway store, so it never touches your real `data/store.json`.
 
 ## Known limitations
 

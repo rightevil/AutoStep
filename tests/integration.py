@@ -14,6 +14,7 @@ from tkinter import ttk
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core import executor, winsys  # noqa: E402
+from core import profile as profile_mod  # noqa: E402
 
 winsys.set_dpi_awareness()
 
@@ -132,6 +133,57 @@ def main() -> int:
     check("旧内容被清空", "OLD-CONTENT" not in state["got"], repr(state["got"]))
     check("中文正常写入", "你好" in state["got"], repr(state["got"]))
     check("Unicode 标点正常", "，" in state["got"] and "。" in state["got"])
+
+    # ---- 第二阶段：档案驱动 ----
+    # 全局设置故意指向不存在的进程，只有档案能找对窗口：
+    # 跑通就证明目标来自序列所属档案，而不是全局设置。
+    prof = profile_mod.normalize(
+        {
+            "id": "selftest",
+            "name": "自检窗口",
+            "match": {"process": "python", "title": TITLE},
+            "input": {"mode": "paste", "clear_first": True},
+            "send": {"combo": "tab"},
+        },
+        "selftest",
+    )
+    bad_settings = dict(
+        settings, target_process="NoSuchProcessXYZ", target_title="", input_mode="keys"
+    )
+    text2 = "档案驱动 paste 测试"
+    steps2 = [
+        {"type": "click", "rect": rect_entry},
+        {"type": "type", "rect": rect_entry, "text": text2},
+        {"type": "key", "combo": profile_mod.SEND_ALIAS},
+    ]
+    state["got"] = ""
+    state["clicks"] = 0
+    logs2 = []
+    box2 = {}
+
+    def worker2():
+        box2["r"] = executor.execute(steps2, bad_settings, logs2.append, 0, prof)
+
+    th2 = threading.Thread(target=worker2, daemon=True)
+    th2.start()
+    t1 = time.time()
+    while th2.is_alive() and time.time() - t1 < 40:
+        root.update()
+        time.sleep(0.02)
+    for _ in range(10):
+        root.update()
+        time.sleep(0.05)
+
+    print("\n档案模式日志:")
+    for line in logs2:
+        print("   ", line)
+
+    r2 = box2.get("r") or {}
+    typed = entry.get()
+    check("档案模式：全局目标无效时仍能跑通", r2.get("ok") is True, str(r2.get("message")))
+    check("档案模式：内容一致（读输入框实际值）", typed == text2, repr(typed))
+    check("档案模式：@send 解析成档案里的按键",
+          any("-> tab" in line for line in logs2), str(logs2[-1] if logs2 else ""))
 
     root.destroy()
     print(f"\n结果: {ok} 通过, {fail} 失败")

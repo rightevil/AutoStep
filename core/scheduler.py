@@ -157,11 +157,12 @@ class Scheduler:
                 self._log(f"检测到超时 {overdue:.0f}s（系统可能刚从睡眠恢复），等待 8 秒稳定…")
                 time.sleep(8)
 
-            hwnd = winsys.find_target(
-                self.store.settings.get("target_process", ""),
-                self.store.settings.get("target_title", ""),
+            prof = self.store.sequence_profile(seq)
+            if prof:
+                self._log(f"应用档案: {prof.get('name', '')}")
+            res = executor.execute(
+                seq.get("steps", []), self.store.settings, self._log, 0, prof
             )
-            res = executor.execute(seq.get("steps", []), self.store.settings, self._log, hwnd)
             self._log(("✔ " if res["ok"] else "✘ ") + res["message"])
 
             if plan is not None:

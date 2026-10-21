@@ -66,16 +66,24 @@ def main() -> int:
     assert hwnd, "找不到自检窗口"
 
     store = Store(tmp)
+    # 目标现在跟着序列所属的档案走，不再读全局设置
+    prof = store.upsert_profile(
+        {
+            "id": "selftest",
+            "name": "调度自检窗口",
+            "match": {"process": "python", "title": TITLE},
+            "input": {"mode": "auto", "clear_first": True},
+            "send": {"combo": "enter"},
+        }
+    )
     store.settings.update({
-        "target_process": "python",
-        "target_title": TITLE,
         "step_delay": 0.5,
         "activate_delay": 0.6,
-        "input_mode": "auto",
         "screenshot_after_run": False,
         "wake_before_run": True,
     })
     seq = store.default_sequence()
+    seq["profile_id"] = prof["id"]
     seq["steps"] = [
         {"type": "click", "rect": ratio_of(entry, hwnd), "note": ""},
         {"type": "type", "rect": ratio_of(entry, hwnd), "text": "定时任务自动执行 OK", "clear_first": True},

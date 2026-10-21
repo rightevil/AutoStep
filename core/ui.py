@@ -12,6 +12,7 @@ from tkinter import messagebox, ttk
 from typing import Any, Callable, Dict, List, Optional
 
 from . import capture, executor, winsys
+from . import profile as profile_mod
 from .config import APP_ID, APP_NAME, DATA_DIR, LEGACY_IDS, LOG_DIR, SHOT_DIR
 from .scheduler import Scheduler, append_log_file
 from .store import Store, now_str, parse_dt
@@ -21,6 +22,7 @@ FONT_BOLD = ("Microsoft YaHei UI", 9, "bold")
 FONT_MONO = ("Consolas", 9)
 
 TYPE_LABEL = {"click": "点击", "type": "输入", "key": "按键"}
+SEND_LABEL = "发送（应用默认）"
 
 
 class App:
@@ -42,6 +44,7 @@ class App:
         self._refresh_target_list()
         self._refresh_sequences()
         self._refresh_steps()
+        self._refresh_profile_combo()
         self._refresh_plans()
 
         self.scheduler = Scheduler(store, lambda k, p: self.q.put((k, p)))
@@ -70,25 +73,24 @@ class App:
     def _build(self) -> None:
         pad = {"padx": 8, "pady": 4}
 
-        # ---- 目标窗口 ----
-        frm_t = ttk.LabelFrame(self.root, text="目标窗口")
+        # ---- 目标应用（档案）----
+        frm_t = ttk.LabelFrame(self.root, text="目标应用（跟随当前序列）")
         frm_t.pack(fill="x", **pad)
         row = ttk.Frame(frm_t)
         row.pack(fill="x", padx=8, pady=(6, 2))
-        ttk.Label(row, text="进程名").pack(side="left")
-        self.var_proc = tk.StringVar()
-        ttk.Entry(row, textvariable=self.var_proc, width=18).pack(side="left", padx=(4, 12))
-        ttk.Label(row, text="标题含").pack(side="left")
-        self.var_title = tk.StringVar()
-        ttk.Entry(row, textvariable=self.var_title, width=24).pack(side="left", padx=(4, 12))
-        ttk.Button(row, text="刷新", width=6, command=self._refresh_target_list).pack(side="left", padx=2)
+        ttk.Label(row, text="档案").pack(side="left")
+        self.cmb_prof = ttk.Combobox(row, width=34, state="readonly")
+        self.cmb_prof.pack(side="left", padx=(4, 10))
+        self.cmb_prof.bind("<<ComboboxSelected>>", self._on_pick_profile)
+        ttk.Button(row, text="新建档案", width=9, command=self._new_profile).pack(side="left", padx=2)
+        ttk.Button(row, text="编辑档案", width=9, command=self._edit_profile).pack(side="left", padx=2)
         ttk.Button(row, text="检测", width=6, command=self._test_target).pack(side="left", padx=2)
         self.lbl_target = ttk.Label(row, text="", foreground="#666")
         self.lbl_target.pack(side="left", padx=10)
 
         row2 = ttk.Frame(frm_t)
         row2.pack(fill="x", padx=8, pady=(0, 6))
-        ttk.Label(row2, text="从窗口列表选择").pack(side="left")
+        ttk.Label(row2, text="从窗口列表选择（写入当前档案）").pack(side="left")
         self.cmb_win = ttk.Combobox(row2, width=58, state="readonly")
         self.cmb_win.pack(side="left", padx=6, fill="x", expand=True)
         self.cmb_win.bind("<<ComboboxSelected>>", self._on_pick_window)
@@ -123,6 +125,7 @@ class App:
         bar2.pack(fill="x", padx=8, pady=(0, 8))
         ttk.Button(bar2, text="+ 点击", width=8, command=self._add_click).pack(side="left", padx=2)
         ttk.Button(bar2, text="+ 输入", width=8, command=self._add_type).pack(side="left", padx=2)
+        ttk.Button(bar2, text="+ 发送", width=8, command=self._add_send).pack(side="left", padx=2)
         ttk.Button(bar2, text="+ 按键", width=8, command=self._add_key).pack(side="left", padx=2)
         ttk.Separator(bar2, orient="vertical").pack(side="left", fill="y", padx=8)
         ttk.Button(bar2, text="编辑", width=6, command=self._edit_step).pack(side="left", padx=2)
@@ -150,24 +153,22 @@ class App:
         ttk.Spinbox(g, from_=0, to=30, increment=0.1, width=8, textvariable=self.var_act,
                     command=self._save_settings).grid(row=1, column=1, sticky="w", padx=6)
         ttk.Label(g, text="输入方式").grid(row=2, column=0, sticky="w", pady=3)
-        self.var_mode = tk.StringVar(value="auto")
-        ttk.Combobox(g, width=16, state="readonly", textvariable=self.var_mode,
-                     values=["auto", "keys", "paste"]).grid(row=2, column=1, sticky="w", padx=6)
-        self.var_clear = tk.BooleanVar(value=True)
-        ttk.Checkbutton(g, text="输入前先 Ctrl+A 清空", variable=self.var_clear,
-                        command=self._save_settings).grid(row=3, column=0, columnspan=2, sticky="w", pady=2)
+        self.lbl_input = ttk.Label(g, text="（见档案）", foreground="#666")
+        self.lbl_input.grid(row=2, column=1, sticky="w", padx=6)
         self.var_shot = tk.BooleanVar(value=True)
         ttk.Checkbutton(g, text="执行后截图存证", variable=self.var_shot,
-                        command=self._save_settings).grid(row=4, column=0, columnspan=2, sticky="w", pady=2)
+                        command=self._save_settings).grid(row=3, column=0, columnspan=2, sticky="w", pady=2)
         self.var_wake = tk.BooleanVar(value=True)
         ttk.Checkbutton(g, text="执行前唤醒系统", variable=self.var_wake,
-                        command=self._on_wake_toggle).grid(row=5, column=0, columnspan=2, sticky="w", pady=2)
+                        command=self._on_wake_toggle).grid(row=4, column=0, columnspan=2, sticky="w", pady=2)
         self.var_tray = tk.BooleanVar(value=True)
         ttk.Checkbutton(g, text="关闭窗口时缩到托盘", variable=self.var_tray,
-                        command=self._save_settings).grid(row=6, column=0, columnspan=2, sticky="w", pady=2)
+                        command=self._save_settings).grid(row=5, column=0, columnspan=2, sticky="w", pady=2)
         self.var_boot = tk.BooleanVar(value=False)
         ttk.Checkbutton(g, text="开机自动启动", variable=self.var_boot,
-                        command=self._on_autostart_toggle).grid(row=7, column=0, columnspan=2, sticky="w", pady=2)
+                        command=self._on_autostart_toggle).grid(row=6, column=0, columnspan=2, sticky="w", pady=2)
+        ttk.Label(g, text="输入方式与发送键跟着档案走，\n换应用只需换档案。", foreground="#888",
+                  justify="left").grid(row=7, column=0, columnspan=2, sticky="w", pady=(6, 0))
         for w in ("TCombobox",):
             g.option_add("*TCombobox*Listbox.font", FONT)
 
@@ -176,13 +177,13 @@ class App:
         pcols = ("name", "seq", "when", "repeat", "state", "next", "status")
         self.tv_plans = ttk.Treeview(frm_p, columns=pcols, show="headings", height=5)
         for c, w, txt, anc in (
-            ("name", 126, "计划名称", "w"),
-            ("seq", 96, "动作序列", "w"),
-            ("when", 104, "设定时间", "center"),
-            ("repeat", 50, "重复", "center"),
-            ("state", 62, "状态", "center"),
-            ("next", 104, "下次触发", "center"),
-            ("status", 108, "上次结果", "w"),
+            ("name", 100, "计划名称", "w"),
+            ("seq", 156, "动作序列 / 应用", "w"),
+            ("when", 128, "设定时间", "center"),
+            ("repeat", 44, "重复", "center"),
+            ("state", 56, "状态", "center"),
+            ("next", 112, "下次触发", "center"),
+            ("status", 88, "上次结果", "w"),
         ):
             self.tv_plans.heading(c, text=txt)
             self.tv_plans.column(c, width=w, anchor=anc)
@@ -243,7 +244,72 @@ class App:
             pass
         self.root.after(150, self._drain)
 
-    # ---------------------------------------------------------------- 目标窗口
+    # ---------------------------------------------------------------- 目标应用（档案）
+
+    def _current_profile(self) -> Optional[Dict[str, Any]]:
+        seq = self._current_seq()
+        if not seq:
+            return None
+        return self.store.get_profile(seq.get("profile_id", ""))
+
+    def _set_seq_profile(self, profile_id: str) -> None:
+        seq = self._current_seq()
+        if not seq or not profile_id:
+            return
+        seq["profile_id"] = profile_id
+        self.store.save()
+        self._refresh_plans()
+
+    def _refresh_profile_combo(self) -> None:
+        choices = self.store.profile_choices()
+        self._prof_labels = [profile_mod.describe(p) for p in choices]
+        self._prof_ids = [p["id"] for p in choices]
+        self.cmb_prof["values"] = self._prof_labels
+        cur = self._current_profile()
+        idx = 0
+        if cur and cur["id"] in self._prof_ids:
+            idx = self._prof_ids.index(cur["id"])
+        if self._prof_labels:
+            self.cmb_prof.current(idx)
+        if cur:
+            i = cur.get("input") or {}
+            clear = "先清空" if i.get("clear_first") else "不清空"
+            send = (cur.get("send") or {}).get("combo", "enter")
+            self.lbl_input.configure(text=f"{i.get('mode', 'auto')} · {clear} · 发送 {send}")
+        # 换档案必须丢掉旧的 hwnd 缓存，否则会沿用上一个应用匹配到的窗口
+        self.target_hwnd = 0
+        self._test_target()
+
+    def _on_pick_profile(self, _evt=None) -> None:
+        idx = self.cmb_prof.current()
+        if 0 <= idx < len(self._prof_ids):
+            self._set_seq_profile(self._prof_ids[idx])
+            self._refresh_profile_combo()
+
+    def _new_profile(self) -> None:
+        prof = ProfileDialog.ask(self.root, None)
+        if not prof:
+            return
+        saved = self.store.upsert_profile(prof)
+        self._set_seq_profile(saved["id"])
+        self._refresh_profile_combo()
+        self._log(f"已新建档案「{saved['name']}」")
+
+    def _edit_profile(self) -> None:
+        cur = self._current_profile()
+        if not cur:
+            return
+        prof = ProfileDialog.ask(self.root, cur, deletable=len(self.store.profiles) > 1)
+        if not prof:
+            return
+        if prof.get("__delete__"):
+            if self.store.remove_profile(cur["id"]):
+                self._refresh_profile_combo()
+                self._log(f"已删除档案「{cur.get('name')}」，相关序列改挂默认档案")
+            return
+        saved = self.store.upsert_profile(prof)
+        self._refresh_profile_combo()
+        self._log(f"已保存档案「{saved['name']}」")
 
     def _refresh_target_list(self) -> None:
         vals: Dict[str, int] = {}
@@ -263,29 +329,55 @@ class App:
         hwnd = self._win_values.get(label, 0)
         if not hwnd:
             return
+        prof = self._current_profile()
+        if not prof:
+            return
         info = winsys.window_info(hwnd)
-        self.var_proc.set(str(info["process"]))
-        self.var_title.set("")
+        prof["match"] = {"process": str(info["process"]), "title": ""}
+        self.store.upsert_profile(prof)
         self.target_hwnd = hwnd
-        self._save_settings()
-        self._log(f"已选目标窗口: {info['process']} · {info['title']}")
-        self._test_target()
+        self._refresh_profile_combo()
+        self._log(f"已把档案「{prof.get('name')}」的目标设为 {info['process']} · {info['title']}")
 
     def _test_target(self) -> None:
-        hwnd = winsys.find_target(self.var_proc.get(), self.var_title.get(), self.target_hwnd)
+        prof = self._current_profile()
+        if not prof:
+            self.lbl_target.configure(text="未选择序列", foreground="#c00000")
+            return
+        if not profile_mod.has_target(prof):
+            self.target_hwnd = 0
+            self.lbl_target.configure(text="✗ 档案还没设目标窗口", foreground="#c00000")
+            return
+        hwnd = profile_mod.match_target(prof, self.target_hwnd)
         if hwnd:
             self.target_hwnd = hwnd
             info = winsys.window_info(hwnd)
-            l, t, w, h = winsys.client_rect(hwnd)
-            self.lbl_target.configure(text=f"✓ 已匹配 (hwnd={hwnd}, 客户区 {w}×{h})", foreground="#0a7d33")
+            _, _, w, h = winsys.client_rect(hwnd)
+            self.lbl_target.configure(
+                text=f"✓ {info['process']} · 客户区 {w}×{h}", foreground="#0a7d33"
+            )
         else:
-            self.lbl_target.configure(text="✗ 未找到匹配窗口", foreground="#c00000")
-        return
+            self.target_hwnd = 0
+            self.lbl_target.configure(text="✗ 该应用的窗口没找到", foreground="#c00000")
 
     def _ensure_target(self) -> int:
-        hwnd = winsys.find_target(self.var_proc.get(), self.var_title.get(), self.target_hwnd)
+        prof = self._current_profile()
+        if not prof:
+            return 0
+        if not profile_mod.has_target(prof):
+            messagebox.showwarning(
+                "档案没有目标",
+                f"当前档案「{prof.get('name', '')}」还没设置目标窗口。\n"
+                "点「编辑档案」填进程名，或从下面的窗口列表选一个。",
+            )
+            return 0
+        hwnd = profile_mod.match_target(prof, self.target_hwnd)
         if not hwnd:
-            messagebox.showwarning("没有目标窗口", "没找到匹配的窗口。请确认 ChatGPT（Codex）已启动，并点「刷新」重新选择。")
+            messagebox.showwarning(
+                "没有目标窗口",
+                f"没找到「{prof.get('name', '')}」对应的窗口。\n"
+                "请确认该应用已启动，再点「检测」，或从窗口列表重新选择。",
+            )
             return 0
         self.target_hwnd = hwnd
         return hwnd
@@ -294,12 +386,8 @@ class App:
 
     def _load_settings(self) -> None:
         s = self.store.settings
-        self.var_proc.set(s.get("target_process", ""))
-        self.var_title.set(s.get("target_title", ""))
         self.var_delay.set(float(s.get("step_delay", 1.0)))
         self.var_act.set(float(s.get("activate_delay", 1.0)))
-        self.var_mode.set(s.get("input_mode", "auto"))
-        self.var_clear.set(bool(s.get("clear_first", True)))
         self.var_shot.set(bool(s.get("screenshot_after_run", True)))
         self.var_wake.set(bool(s.get("wake_before_run", True)))
         self.var_tray.set(bool(s.get("minimize_to_tray", True)))
@@ -307,8 +395,6 @@ class App:
 
     def _save_settings(self) -> None:
         s = self.store.settings
-        s["target_process"] = self.var_proc.get().strip()
-        s["target_title"] = self.var_title.get().strip()
         try:
             s["step_delay"] = round(float(self.var_delay.get()), 2)
         except Exception:
@@ -317,8 +403,6 @@ class App:
             s["activate_delay"] = round(float(self.var_act.get()), 2)
         except Exception:
             pass
-        s["input_mode"] = self.var_mode.get()
-        s["clear_first"] = bool(self.var_clear.get())
         s["screenshot_after_run"] = bool(self.var_shot.get())
         s["wake_before_run"] = bool(self.var_wake.get())
         s["minimize_to_tray"] = bool(self.var_tray.get())
@@ -409,15 +493,18 @@ class App:
         if 0 <= idx < len(self.store.sequences):
             self.seq_id = self.store.sequences[idx]["id"]
             self._refresh_steps()
+            self._refresh_profile_combo()
 
     def _new_seq(self) -> None:
         name = SimplePrompt.ask(self.root, "新建序列", "序列名称", f"序列{len(self.store.sequences)+1}")
         if not name:
             return
-        seq = self.store.add_sequence(name)
+        cur = self._current_profile()
+        seq = self.store.add_sequence(name, cur["id"] if cur else "")
         self.seq_id = seq["id"]
         self._refresh_sequences()
         self._refresh_steps()
+        self._refresh_profile_combo()
 
     def _rename_seq(self) -> None:
         seq = self._current_seq()
@@ -441,6 +528,7 @@ class App:
         self._refresh_sequences()
         self._refresh_steps()
         self._refresh_plans()
+        self._refresh_profile_combo()
 
     # ---------------------------------------------------------------- 动作
 
@@ -460,7 +548,8 @@ class App:
             if t == "type":
                 content = st.get("text", "").replace("\n", " ⏎ ")
             elif t == "key":
-                content = st.get("combo", "enter")
+                combo = st.get("combo", "enter")
+                content = SEND_LABEL if combo == profile_mod.SEND_ALIAS else combo
             else:
                 content = st.get("note", "")
             if len(content) > 90:
@@ -539,6 +628,13 @@ class App:
             self._log(f"已添加输入动作（{len(text)} 字符）")
 
         self._pick_region(done)
+
+    def _add_send(self) -> None:
+        """插入「按当前档案的发送键」，换应用时不用改这一条。"""
+        prof = self._current_profile()
+        combo = profile_mod.resolve_send(prof)
+        self._append_step({"type": "key", "combo": profile_mod.SEND_ALIAS})
+        self._log(f"已添加发送动作（当前档案按 {combo}）")
 
     def _add_key(self) -> None:
         res = KeyDialog.ask(self.root, "按键动作")
@@ -623,6 +719,11 @@ class App:
         for i, p in enumerate(self.store.plans):
             seq = self.store.get_sequence(p.get("seq_id", ""))
             seq_name = seq["name"] if seq else "（已删除）"
+            prof = self.store.sequence_profile(seq) if seq else None
+            if prof:
+                # 一眼看出这条计划会对哪个应用下手（放进程名，比档案名短）
+                tag = (prof.get("match") or {}).get("process") or prof.get("name", "")
+                seq_name = f"{seq_name} / {tag}"
             repeat = "每天" if p.get("repeat") == "daily" else "一次"
             nxt = p.get("next_fire") or "—"
             if not p.get("enabled"):
@@ -875,6 +976,103 @@ class KeyDialog:
         ttk.Button(bar, text="确定", width=8, command=ok).pack(side="right")
         ttk.Button(bar, text="取消", width=8, command=win.destroy).pack(side="right", padx=6)
         win.bind("<Return>", ok)
+        win.bind("<Escape>", lambda e: win.destroy())
+        parent.wait_window(win)
+        return result["v"]
+
+
+class ProfileDialog:
+    """应用档案编辑框：目标怎么找、怎么输入、按什么键发送。"""
+
+    @staticmethod
+    def ask(
+        parent, profile: Optional[Dict[str, Any]], deletable: bool = False
+    ) -> Optional[Dict[str, Any]]:
+        win = tk.Toplevel(parent)
+        win.title("编辑应用档案" if profile else "新建应用档案")
+        win.transient(parent)
+        win.grab_set()
+        win.resizable(False, False)
+        p = profile_mod.normalize(profile or {}, "")
+        result: Dict[str, Any] = {"v": None}
+
+        body = ttk.Frame(win)
+        body.pack(fill="both", padx=14, pady=12)
+
+        ttk.Label(body, text="档案名称").grid(row=0, column=0, sticky="w", pady=4)
+        var_name = tk.StringVar(value=p.get("name", ""))
+        ttk.Entry(body, textvariable=var_name, width=32).grid(row=0, column=1, sticky="w")
+
+        ttk.Label(body, text="进程名").grid(row=1, column=0, sticky="w", pady=4)
+        var_proc = tk.StringVar(value=(p.get("match") or {}).get("process", ""))
+        ttk.Entry(body, textvariable=var_proc, width=32).grid(row=1, column=1, sticky="w")
+        ttk.Label(body, text="包含即可，如 ChatGPT 能匹配 ChatGPT.exe", foreground="#888").grid(
+            row=2, column=1, sticky="w"
+        )
+
+        ttk.Label(body, text="标题含（可空）").grid(row=3, column=0, sticky="w", pady=4)
+        var_title = tk.StringVar(value=(p.get("match") or {}).get("title", ""))
+        ttk.Entry(body, textvariable=var_title, width=32).grid(row=3, column=1, sticky="w")
+
+        ttk.Label(body, text="输入方式").grid(row=4, column=0, sticky="w", pady=4)
+        var_mode = tk.StringVar(value=(p.get("input") or {}).get("mode", "auto"))
+        ttk.Combobox(
+            body, textvariable=var_mode, width=29, state="readonly",
+            values=["auto", "keys", "paste"],
+        ).grid(row=4, column=1, sticky="w")
+        ttk.Label(
+            body, text="auto=含中文走剪贴板；keys=一律逐键；paste=一律粘贴", foreground="#888"
+        ).grid(row=5, column=1, sticky="w")
+
+        var_clear = tk.BooleanVar(value=(p.get("input") or {}).get("clear_first", True))
+        ttk.Checkbutton(body, text="输入前先 Ctrl+A 清空", variable=var_clear).grid(
+            row=6, column=0, columnspan=2, sticky="w", pady=2
+        )
+
+        ttk.Label(body, text="发送键").grid(row=7, column=0, sticky="w", pady=4)
+        var_send = tk.StringVar(value=(p.get("send") or {}).get("combo", "enter"))
+        ttk.Combobox(
+            body, textvariable=var_send, width=29,
+            values=["enter", "ctrl+enter", "shift+enter", "tab"],
+        ).grid(row=7, column=1, sticky="w")
+        ttk.Label(body, text="「+ 发送」动作按这里设置的键发出去", foreground="#888").grid(
+            row=8, column=1, sticky="w"
+        )
+
+        def ok() -> None:
+            proc = var_proc.get().strip()
+            title = var_title.get().strip()
+            if not proc and not title:
+                if not messagebox.askyesno(
+                    "还没设目标",
+                    "进程名和标题都是空的，这条档案找不到任何窗口，执行时会直接失败。\n仍然保存吗？",
+                    parent=win,
+                ):
+                    return
+            result["v"] = {
+                "id": p.get("id", ""),
+                "name": var_name.get().strip() or proc or "未命名档案",
+                "match": {"process": proc, "title": title},
+                "input": {"mode": var_mode.get(), "clear_first": bool(var_clear.get())},
+                "send": {"combo": var_send.get().strip() or "enter"},
+                "verify": {"type": "none"},
+            }
+            win.destroy()
+
+        def do_delete() -> None:
+            if not messagebox.askyesno(
+                "删除档案", "删除后，用它的序列会改挂默认档案。确定？", parent=win
+            ):
+                return
+            result["v"] = {"__delete__": True}
+            win.destroy()
+
+        bar = ttk.Frame(win)
+        bar.pack(fill="x", padx=14, pady=(0, 12))
+        ttk.Button(bar, text="保存", width=8, command=ok).pack(side="right")
+        ttk.Button(bar, text="取消", width=8, command=win.destroy).pack(side="right", padx=6)
+        if deletable and profile:
+            ttk.Button(bar, text="删除", width=8, command=do_delete).pack(side="left")
         win.bind("<Escape>", lambda e: win.destroy())
         parent.wait_window(win)
         return result["v"]
