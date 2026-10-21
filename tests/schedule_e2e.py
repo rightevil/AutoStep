@@ -20,7 +20,7 @@ winsys.set_dpi_awareness()
 from core.scheduler import Scheduler  # noqa: E402
 from core.store import Store  # noqa: E402
 
-TITLE = "autocodex-sched-test"
+TITLE = "autostep-sched-test"
 state = {"clicks": 0, "got": ""}
 
 

@@ -9,6 +9,11 @@ LOG_DIR = DATA_DIR / "logs"
 SHOT_DIR = DATA_DIR / "shots"
 STORE_PATH = DATA_DIR / "store.json"
 
+# ---- 应用标识（唯一来源，别在别处硬编码）----
+APP_NAME = "AutoStep"          # 显示名：窗口标题、托盘提示、消息框
+APP_ID = "autostep"            # 机器标识：单实例 mutex、托盘 icon id、注册表项名
+LEGACY_IDS = ("autocodex",)    # 改名前用过的标识，启动时清理残留
+
 for _d in (DATA_DIR, LOG_DIR, SHOT_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 

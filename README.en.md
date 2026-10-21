@@ -144,6 +144,7 @@ Once configured, leave AutoStep in the tray. Tray menu: **Show window**, **Run c
 
 ```
 main.py               entry point: per-monitor DPI awareness, single-instance mutex, UI start
+core/config.py        paths, default settings, app identity (single source for APP_NAME / APP_ID)
 core/winsys.py        window enumeration/activation, coordinate mapping, sleep prevention,
                       waitable-timer wake, lock-screen detection
 core/capture.py       client-area screenshot + translucent drag-to-select overlay

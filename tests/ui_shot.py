@@ -16,7 +16,7 @@ sys.path.insert(0, str(HERE))
 from core import winsys  # noqa: E402
 
 winsys.set_dpi_awareness()
-hwnd = winsys.find_target("pythonw", "autocodex")
+hwnd = winsys.find_target("pythonw", "AutoStep")
 print("hwnd =", hwnd)
 if hwnd:
     winsys.activate(hwnd)

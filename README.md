@@ -108,6 +108,7 @@ data/shots/*.png    执行后截图
 
 ```
 main.py              入口：DPI 声明、单实例、启动 UI
+core/config.py       路径、默认设置、应用标识（APP_NAME / APP_ID 唯一来源）
 core/winsys.py       窗口枚举/激活、坐标换算、防休眠、系统唤醒、锁屏检测
 core/capture.py      客户区截图 + 拖拽框选覆盖层
 core/executor.py     动作回放（点击 / Unicode 逐字符 / 剪贴板粘贴 / 组合键）

@@ -12,7 +12,7 @@ from tkinter import messagebox, ttk
 from typing import Any, Callable, Dict, List, Optional
 
 from . import capture, executor, winsys
-from .config import DATA_DIR, LOG_DIR, SHOT_DIR
+from .config import APP_ID, APP_NAME, DATA_DIR, LEGACY_IDS, LOG_DIR, SHOT_DIR
 from .scheduler import Scheduler, append_log_file
 from .store import Store, now_str, parse_dt
 
@@ -33,7 +33,7 @@ class App:
         self._win_values: Dict[str, int] = {}
         self.tray = None
 
-        self.root.title("autocodex · Codex 定时执行")
+        self.root.title(f"{APP_NAME} · 定时执行")
         self.root.geometry("1100x862+60+30")
         self.root.minsize(1040, 700)
         self._init_style()
@@ -348,7 +348,7 @@ class App:
 
         from .config import APP_DIR
 
-        name = "autocodex"
+        name = APP_ID
         try:
             key = winreg.OpenKey(
                 winreg.HKEY_CURRENT_USER,
@@ -359,6 +359,14 @@ class App:
         except Exception as e:
             return False, str(e)
         try:
+            # 清掉旧标识留下的自动启动项，避免改名前后的两条同时生效
+            for legacy in LEGACY_IDS:
+                try:
+                    winreg.DeleteValue(key, legacy)
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    pass
             if enable:
                 exe = Path(sys.executable)
                 if exe.name.lower() != "pythonw.exe":
@@ -733,7 +741,7 @@ class App:
                 pystray.MenuItem("试运行当前序列", lambda: (self.q.put(("show", None)), self.root.after(300, self._run_now))),
                 pystray.MenuItem("退出", lambda: self.q.put(("quit", None))),
             )
-            self.tray = pystray.Icon("autocodex", img, "autocodex · Codex 定时执行", menu)
+            self.tray = pystray.Icon(APP_ID, img, f"{APP_NAME} · 定时执行", menu)
             self.tray.run_detached()
         except Exception as e:
             self.tray = None
@@ -749,7 +757,7 @@ class App:
         if self.var_tray.get() and self.tray is not None:
             self.root.withdraw()
             try:
-                self.tray.notify("autocodex 仍在后台待命，计划到点会自动执行。", "autocodex")
+                self.tray.notify(f"{APP_NAME} 仍在后台待命，计划到点会自动执行。", APP_NAME)
             except Exception:
                 pass
             self._log("已缩到托盘，继续后台待命。")

@@ -17,7 +17,7 @@ from core import executor, winsys  # noqa: E402
 
 winsys.set_dpi_awareness()
 
-TITLE = "autocodex-selftest"
+TITLE = "autostep-selftest"
 state = {"clicks": 0, "got": "", "dots": 0}
 
 
@@ -44,7 +44,7 @@ def main() -> int:
     root.geometry("620x240+380+260")
     root.attributes("-topmost", True)
 
-    ttk.Label(root, text="autocodex 自检窗口（测试中请勿动鼠标）", font=("Microsoft YaHei UI", 11)).pack(pady=10)
+    ttk.Label(root, text="AutoStep 自检窗口（测试中请勿动鼠标）", font=("Microsoft YaHei UI", 11)).pack(pady=10)
 
     entry = ttk.Entry(root, width=52, font=("Microsoft YaHei UI", 11))
     entry.pack(pady=8)
