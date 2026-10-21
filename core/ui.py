@@ -368,12 +368,16 @@ class App:
                 except OSError:
                     pass
             if enable:
-                exe = Path(sys.executable)
-                if exe.name.lower() != "pythonw.exe":
-                    cand = exe.with_name("pythonw.exe")
-                    if cand.exists():
-                        exe = cand
-                cmd = f'"{exe}" "{APP_DIR / "main.py"}"'
+                if getattr(sys, "frozen", False):
+                    # 打包后没有 main.py，直接指向 exe 自己
+                    cmd = f'"{sys.executable}"'
+                else:
+                    exe = Path(sys.executable)
+                    if exe.name.lower() != "pythonw.exe":
+                        cand = exe.with_name("pythonw.exe")
+                        if cand.exists():
+                            exe = cand
+                    cmd = f'"{exe}" "{APP_DIR / "main.py"}"'
                 winreg.SetValueEx(key, name, 0, winreg.REG_SZ, cmd)
                 return True, cmd
             try:
@@ -726,15 +730,10 @@ class App:
     def _start_tray(self) -> None:
         try:
             import pystray
-            from PIL import Image, ImageDraw
 
-            img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
-            d = ImageDraw.Draw(img)
-            d.ellipse((3, 3, 61, 61), fill=(28, 110, 240, 255))
-            d.ellipse((11, 11, 53, 53), fill=(255, 255, 255, 255))
-            d.ellipse((12, 12, 52, 52), fill=(28, 110, 240, 255))
-            d.line((32, 32, 32, 17), fill=(255, 255, 255, 255), width=4)
-            d.line((32, 32, 45, 38), fill=(255, 255, 255, 255), width=4)
+            from .icon import make_icon
+
+            img = make_icon(64)
 
             menu = pystray.Menu(
                 pystray.MenuItem("显示主窗口", lambda: self.q.put(("show", None)), default=True),
