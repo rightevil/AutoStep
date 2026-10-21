@@ -1,0 +1,10 @@
+[tools]
+python = "3.13"
+
+[tasks.install]
+description = "创建 venv 并安装依赖"
+run = "python -m venv .venv && .venv/Scripts/python.exe -m pip install -U pip && .venv/Scripts/python.exe -m pip install -r requirements.txt"
+
+[tasks.run]
+description = "启动应用"
+run = ".venv/Scripts/pythonw.exe main.py"

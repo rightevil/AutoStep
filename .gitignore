@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Runtime data (action sequences, plans, logs, screenshots)
+data/
+
+# OS / editors
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
