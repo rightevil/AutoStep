@@ -1,179 +1,121 @@
 # AutoStep
 
-**Record mouse clicks and text input once, then replay them on a schedule — unattended, in the background.**
+在后台潜伏，到点自动在 **ChatGPT 桌面应用的 Codex 界面**里按录制好的顺序点击 / 输入 / 发送按键。
 
-AutoStep is a small Windows tray application built for driving the **Codex** panel inside the ChatGPT desktop app on a timer. You record a sequence of actions (click a region, type a prompt, press Enter), attach that sequence to a schedule, and AutoStep stays quietly in the system tray until the scheduled moment, then performs the whole sequence on the live window.
-
-English | [简体中文](README.zh-CN.md)
+简体中文 | [English](README.en.md)
 
 ---
 
-## Why it exists
-
-Asking an AI coding agent the same thing every night (a nightly refactor prompt, a daily summary request, a repeatable "run the tests and report" job) means being in front of the machine at the right minute. AutoStep turns that into a recorded macro plus a schedule:
-
-- **You record the intent once.** No prompt templates in a config file, no API keys — it drives the real GUI.
-- **It survives sleep.** A waitable timer wakes the machine ahead of time so the run is not silently missed.
-- **It stays out of the way.** Hidden in the tray, single instance, no console window.
-
-## Features
-
-| | |
-|---|---|
-| **Region recording** | Click actions are captured by dragging a box over a live screenshot of the target window — no coordinate guessing. |
-| **Text input with CJK support** | Pure-ASCII text is typed key by key; anything containing non-ASCII is pasted through the clipboard (original clipboard content is restored). |
-| **Key actions** | `enter`, `ctrl+enter`, `tab`, arrows, and arbitrary `ctrl+shift+x` style combos. |
-| **DPI-safe coordinates** | Positions are stored as *percentages of the window's client area*, so moving, resizing or maximising the window never shifts the click. |
-| **Multiple sequences** | Keep several action sets, rename them, share one sequence between many schedules. |
-| **Editable schedules** | Name, date (with a month-view picker), time, once / daily, and which sequence to run. Every plan is re-scheduled automatically after editing. |
-| **Sleep-aware** | Arms a waitable timer to wake the system ~90 s before a run, plus a wall-clock catch-up check. |
-| **Evidence** | Each run appends to a daily log and can save a screenshot of the final state. |
-| **Tray residence** | Closing the window hides it to the tray; optional start-with-Windows via the `Run` registry key. |
-
-## Requirements
-
-- Windows 10 / 11 (relies on Win32 APIs — `pywin32`)
-- Python 3.13 (pinned in `mise.toml`; any 3.10+ should work)
-- Optional: [mise](https://mise.jdx.dev/) for automatic toolchain setup
-
-Runtime dependencies: `mss`, `Pillow`, `pywin32`, `pyperclip`, `pystray` (about 15 MB total). The UI is plain `tkinter`, so nothing extra to install.
-
-## Installation
+## 一、首次准备
 
 ```bash
 git clone https://github.com/rightevil/AutoStep.git
 cd AutoStep
+mise install        # 装 Python 3.13（已在 mise.toml 里锁版本）
+mise run install    # 建 .venv + 装依赖
 ```
 
-With mise (recommended):
+依赖只有 5 个：mss、Pillow、pywin32、pyperclip、pystray，总共十几 MB。界面用 Python 自带的 tkinter，无需额外安装。
+
+## 二、启动
+
+在项目目录下执行：
 
 ```bash
-mise install      # installs Python 3.13 per mise.toml
-mise run install  # creates .venv and installs requirements.txt
+mise run start
 ```
 
-Without mise:
+没有 mise 的话，直接用 venv 里的解释器（`pythonw` 不带控制台窗口，适合常驻后台）：
 
 ```bash
-python -m venv .venv
-.venv\Scripts\python.exe -m pip install -U pip
-.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\pythonw.exe main.py
 ```
 
-## Usage
-
-### 1. Launch
-
-Double-click **`run.bat`** (runs `pythonw.exe`, so there is no console window).
-
-### 2. Pick the target window
-
-AutoStep defaults to the process **`ChatGPT`** — the Codex panel lives inside the ChatGPT desktop app, and its window title changes, so it is matched by process name only.
-
-- **Refresh** — re-enumerate windows (a dropdown of `process — title`).
-- **Check** — confirm a window matches and show its client-area size. A green `✓` means the handle is valid.
-
-### 3. Record actions
-
-A *sequence* is an ordered list of actions; top-to-bottom is the execution order.
-
-| Button | What it does |
-|---|---|
-| **+ Click** | Activates the target window, grabs a screenshot of its client area, and overlays a translucent selector. **Drag a box** over the spot to click; release to record. `Esc` or right-click cancels. |
-| **+ Type** | Same region selection (pick the input box), then a dialog for the text to send — multi-line and mixed Chinese/English are fine. "Clear with Ctrl+A first" is enabled by default. |
-| **+ Key** | Sends a keystroke or combo, e.g. `enter`, `ctrl+enter`. **Do not forget this step** — typing a prompt without sending it does nothing. |
-
-Reorder with **Up / Down**, tweak an entry with **Edit** (double-click a row), remove with **Delete**. Use **Run once now** to rehearse the sequence immediately; watch the log pane at the bottom.
-
-To add another independent set of actions, use **New** in the sequence row. Rename or delete sequences there too — schedules reference a sequence, so editing a sequence updates every schedule that uses it.
-
-### 4. Create a schedule
-
-Click **+ New plan**:
-
-| Field | Notes |
-|---|---|
-| Name | Free text, e.g. `nightly refactor` |
-| Date | Read-only field plus a **📅 Select** button that opens a month calendar (with a "Today" shortcut) |
-| Time | Hour / minute dropdowns, still editable by hand |
-| Repeat | **Once** or **Every day at the same time** |
-| Sequence | Which recorded action set to run |
-
-Scheduling semantics are deliberately dumb — AutoStep only does what you configured:
-
-- **Once** — fires at the given moment, then the plan is marked *done* and will not fire again. The record is **kept**, never deleted; re-enable it manually if you want another run.
-- **Every day** — fires once per day at the given time. Days that were missed (machine off, asleep) are **not** back-filled, so you never get a burst of catch-up runs.
-- The date/time you typed is never rewritten by the app.
-- Every plan row shows the sequence it uses, its state (`pending` / `done` / `disabled` / `expired`), next fire time, and the result of the last run.
-- Select a plan and press **Edit** (or double-click) to change anything; saving re-computes the next fire time and re-enables the plan if the new time is in the future.
-
-### 5. Tune execution
-
-| Setting | Meaning |
-|---|---|
-| Step delay (s) | Fixed pause between two actions. Use **≥ 1.5** for prompts that trigger network work. |
-| Wait after activate (s) | Extra settle time after bringing the window to the foreground. |
-| Input mode | `auto` (ASCII → keystrokes, non-ASCII → clipboard paste), `keys` (force per-character), `paste` (force clipboard). |
-| Clear with Ctrl+A first | Prevents appending to leftover text. |
-| Screenshot after run | Saves a PNG to `data/shots/`. |
-| Wake system before run | Uses a waitable timer to wake the machine ~90 s early. |
-| Minimise to tray on close | Closing the window keeps the scheduler alive in the tray. |
-| Start with Windows | Writes a value to `HKCU\...\CurrentVersion\Run`. |
-
-Once configured, leave AutoStep in the tray. Tray menu: **Show window**, **Run current sequence**, **Quit**.
-
-## How it works
-
-```
-main.py               entry point: per-monitor DPI awareness, single-instance mutex, UI start
-core/winsys.py        window enumeration/activation, coordinate mapping, sleep prevention,
-                      waitable-timer wake, lock-screen detection
-core/capture.py       client-area screenshot + translucent drag-to-select overlay
-core/executor.py      action replay: click / Unicode key-by-key typing / clipboard paste / combos
-core/scheduler.py     timer loop, wake arming, plan firing
-core/store.py         JSON persistence + next-fire computation
-core/ui.py            tkinter main window, dialogs, tray icon
-```
-
-Recorded geometry is stored relative to the window:
-
-```json
-{ "type": "click", "rect": [0.32, 0.85, 0.45, 0.91], "note": "focus the prompt box" }
-{ "type": "type",  "rect": [0.32, 0.85, 0.45, 0.91], "text": "Summarise the open diff.", "clear_first": true }
-{ "type": "key",   "combo": "ctrl+enter" }
-```
-
-`rect` is `[left, top, right, bottom]` as fractions of the client area, so it is independent of resolution and window position.
-
-## Runtime files
-
-```
-data/store.json     sequences, plans and settings
-data/logs/*.log     one log file per day
-data/shots/*.png    post-run screenshots
-```
-
-These are git-ignored — they contain your prompts and schedule.
-
-## Self-tests
+调试想看到 traceback 就把 `pythonw` 换成 `python`：
 
 ```bash
-.venv\Scripts\python.exe tests\smoke.py         # core logic + Win32 layer (29 checks)
-.venv\Scripts\python.exe tests\integration.py   # real click / CJK input against a scratch window (~5 s of mouse control)
-.venv\Scripts\python.exe tests\schedule_e2e.py  # full scheduled run: fire → activate → click → type → send (~8 s of mouse control)
+.venv\Scripts\python.exe main.py
 ```
 
-`tests/ui_shot.py` and `tests/dialog_shot.py` render the window and dialogs to PNGs in `data/shots/` for layout review.
+程序启动后是普通窗口，关闭窗口默认缩到右下角托盘继续待命；托盘图标右键可「显示主窗口 / 试运行当前序列 / 退出」。想让命令行一执行就进后台，可以给它建个快捷方式（目标填 `pythonw.exe main.py` 的完整路径）或勾上界面里的「开机自动启动」。
 
-## Known limitations
+## 三、录制动作
 
-1. **A locked screen means a failed run.** If the machine wakes to the lock screen, clicks land on the lock screen. AutoStep detects this and logs `screen is locked` instead of pretending to succeed.
-   → For unattended runs, set *Power Options → Require sign-in on wakeup* to **Never**.
-2. **Do not touch mouse or keyboard while it runs.** Every step verifies the foreground window, tries to reclaim focus if it was stolen, and aborts (with a log line) if it cannot.
-3. **The target window must not be covered** when you record, otherwise the screenshot captures the overlapping window.
-4. **The tray process must stay alive.** Quitting stops all schedules.
-5. Windows-only by design; the Win32 calls in `core/winsys.py` and `core/executor.py` have no cross-platform fallback.
+1. **目标窗口**：启动时自动检测进程名 `ChatGPT`（Codex 界面在这个进程里，窗口标题会变，所以只按进程名匹配）。点「刷新」可重新抓窗口列表，点「检测」确认是否匹配上（显示 ✓ 已匹配 + 客户区尺寸）。
+2. **+ 点击**：程序会先激活 Codex 窗口并抓一张客户区截图，铺一层覆盖层；用鼠标**拖拽框选**要点的区域，松开即记录。框选时 Esc 或右键取消。
+3. **+ 输入**：同样先框选输入框位置，再在弹窗里填要打的文本（中英混排、多行都支持）。确定后自动带上「Ctrl+A 先清空」。
+4. **+ 按键**：发送 `enter` / `ctrl+enter` 等。**这一步别忘**，光输入不发出去等于没执行。
+5. 列表里可双击编辑、上移下移调整顺序，顺序就是执行顺序。
+6. 一个「动作序列」就是一套完整动作，可新建多套、可重命名、可删除。计划引用序列，多条计划可以共用同一套动作。
 
-## License
+坐标存的是**相对窗口客户区的百分比**，所以窗口移动、最大化/还原、改分辨率都不会错位。
+
+## 四、设计划
+
+点「+ 新计划」：名称、日期（点「📅 选择」用月历挑，不用手打）、时间（小时/分钟下拉，也可直接改）、重复方式、用哪个动作序列。
+
+**只由你决定这一条计划怎么跑**，程序不自作主张：
+
+- 「只跑一次」：到点执行一次，之后状态变「已完成」，**计划记录保留不删**，可以手动再启用。
+- 「每天同一时间」：每天到点执行一次，跨过的日期不补跑，不会一次连打好几遍。
+- **计划随时可编辑**：选中 → 「编辑」（或双击行），能改名称、日期、时间、重复方式、用哪套动作；改完自动重新排期，新时间在未来就恢复待执行。
+- 动作序列名称也可重命名（序列那行的「重命名」）。
+- 计划表里能看到用的是哪套动作、状态（待执行 / 已完成 / 已停用 / 已过期）、下次触发时间、上次结果。
+
+## 五、执行设置
+
+| 项 | 说明 |
+|---|---|
+| 步间固定延时 | 每两步之间等待多少秒。日志里查询这类操作建议 ≥1.5 |
+| 激活后等待 | 窗口切前台后额外等多久 |
+| 输入方式 | `auto` 自动判断；`keys` 强制逐字符；`paste` 强制剪贴板 |
+| 输入前 Ctrl+A 清空 | 防止在旧内容后面接着打 |
+| 执行后截图存证 | 存到 `data/shots/` |
+| 执行前唤醒系统 | 到点前 90 秒用可等待定时器把系统从睡眠唤醒 |
+| 关闭窗口时缩到托盘 | 关窗后调度器仍活着 |
+| 开机自动启动 | 写 `HKCU\...\CurrentVersion\Run` |
+
+## 六、必须知道的限制
+
+1. **锁屏就没法执行。** 系统睡眠唤醒后如果停在锁屏界面，鼠标点击会打在锁屏上。程序会检测并记日志"当前处于锁屏状态"，不会假装成功。
+   → 想让它稳定跑，把「电源选项 → 唤醒时需要登录」设为**从不**。
+2. **执行期间别动鼠标键盘**，会抢焦点导致后续步骤错位。程序每步都会校验前台窗口，被抢走会尝试抢回，抢不回就中止并记日志。
+3. **框选时目标窗口必须在最前面**，程序会自己激活它，但如果有别的窗口置顶遮挡，截到的是遮挡物。
+4. 托盘程序必须保持运行，退出即不再执行。
+5. 仅支持 Windows：`core/winsys.py` 与 `core/executor.py` 里的 Win32 调用没有跨平台兜底。
+
+## 七、日志与文件
+
+```
+data/store.json     所有序列 / 计划 / 设置
+data/logs/*.log     每日运行日志
+data/shots/*.png    执行后截图
+```
+
+这些文件已被 `.gitignore` 忽略——里面是你的提示词和计划。
+
+## 八、自测
+
+```bash
+.venv/Scripts/python.exe tests/smoke.py        # 核心逻辑 + 系统层（29 项）
+.venv/Scripts/python.exe tests/integration.py  # 真实点击/中文输入（会接管鼠标约 5 秒）
+.venv/Scripts/python.exe tests/schedule_e2e.py # 定时自动触发全链路（会接管鼠标约 8 秒）
+```
+
+`tests/ui_shot.py`、`tests/dialog_shot.py` 会把主界面和对话框渲染成 PNG 存到 `data/shots/`，用于核对布局。
+
+## 九、结构
+
+```
+main.py              入口：DPI 声明、单实例、启动 UI
+core/winsys.py       窗口枚举/激活、坐标换算、防休眠、系统唤醒、锁屏检测
+core/capture.py      客户区截图 + 拖拽框选覆盖层
+core/executor.py     动作回放（点击 / Unicode 逐字符 / 剪贴板粘贴 / 组合键）
+core/scheduler.py    定时循环 + 唤醒布防
+core/store.py        JSON 持久化与下次触发时间计算
+core/ui.py           主界面、对话框、托盘图标
+```
+
+## 许可证
 
 MIT
