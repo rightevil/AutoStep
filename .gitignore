@@ -8,6 +8,12 @@ venv/
 # Runtime data (action sequences, plans, logs, screenshots)
 data/
 
+# PyInstaller output
+build/
+dist/
+out/
+AutoStep-*.zip
+
 # OS / editors
 Thumbs.db
 desktop.ini

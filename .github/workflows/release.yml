@@ -1,0 +1,87 @@
+name: release
+
+# 推 tag（v*）自动出包并发 Release；也可以在 Actions 页面手动触发。
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号（形如 v0.1.0），留空则用 v0.1.0"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+env:
+  VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.version || 'v0.1.0' }}
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install -U pip
+          pip install -r requirements.txt
+          pip install "pyinstaller>=6.6"
+
+      # 只做语法、导入与路径解析检查。GUI/鼠标回归测试需要交互式桌面和真实窗口，
+      # 托管 runner 上没有，跑了只会误报失败。
+      - name: Compile check
+        run: |
+          python -m compileall -q core main.py tools
+          python -c "import core.config, core.store, core.executor, core.scheduler, core.icon; print('imports ok')"
+          python tests/frozen_paths.py
+
+      - name: Build exe
+        run: pyinstaller --noconfirm --clean AutoStep.spec
+
+      - name: Verify artifact
+        shell: bash
+        run: |
+          ls -la dist/
+          test -f dist/AutoStep.exe || { echo "构建产物缺失"; exit 1; }
+          du -h dist/AutoStep.exe
+
+      - name: Package zip
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          Copy-Item dist/AutoStep.exe out/
+          Copy-Item README.md, README.en.md, LICENSE out/
+          Compress-Archive -Path out/* -DestinationPath "AutoStep-$env:VERSION-win64.zip" -Force
+          Get-ChildItem AutoStep-*.zip | Format-Table Name, Length
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AutoStep-${{ env.VERSION }}
+          path: AutoStep-*.zip
+          if-no-files-found: error
+
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if git rev-parse -q --verify "refs/tags/${VERSION}" > /dev/null; then
+            gh release create "$VERSION" "AutoStep-${VERSION}-win64.zip" \
+              --title "AutoStep ${VERSION}" \
+              --notes-file .github/release-notes.md
+          else
+            gh release create "$VERSION" "AutoStep-${VERSION}-win64.zip" \
+              --title "AutoStep ${VERSION}" \
+              --notes-file .github/release-notes.md \
+              --target "$GITHUB_SHA"
+          fi
+          gh release view "$VERSION" --json url -q .url
