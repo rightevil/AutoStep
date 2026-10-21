@@ -47,10 +47,15 @@ def load_as_frozen(exe_dir: Path):
 def main() -> int:
     print("== 打包模式：exe 同级可写 ==")
     tmp = Path(tempfile.mkdtemp(prefix="autostep-frozen-"))
+    # mkdtemp 拼的是 TEMP 环境变量的原样写法，在某些机器上不是「真名」——可能是
+    # 8.3 短名（C:\Users\RUNNER~1\...）或经过联接/符号链接。config 那边取的是
+    # resolve() 之后的长名，所以断言两边必须同一口径，否则只在那种机器上挂。
+    tmp_r = tmp.resolve()
     try:
         c = load_as_frozen(tmp)
-        check("APP_DIR 取 exe 所在目录", c.APP_DIR == tmp.resolve(), str(c.APP_DIR))
-        check("DATA_DIR 在 exe 同级", c.DATA_DIR == tmp / "data", str(c.DATA_DIR))
+        check("APP_DIR 取 exe 所在目录", c.APP_DIR == tmp_r, f"{c.APP_DIR} vs {tmp_r}")
+        check("DATA_DIR 在 exe 同级", c.DATA_DIR == tmp_r / "data",
+              f"{c.DATA_DIR} vs {tmp_r / 'data'}")
         check("store.json 路径正确", c.STORE_PATH.name == "store.json", str(c.STORE_PATH))
         check("data/logs/shots 已创建",
               (tmp / "data" / "logs").is_dir() and (tmp / "data" / "shots").is_dir())
@@ -69,7 +74,7 @@ def main() -> int:
         try:
             c2 = load_as_frozen(tmp)
             expect = Path(os.environ.get("APPDATA") or Path.home()) / "AutoStep"
-            check("退回 %APPDATA%\\AutoStep", c2.APP_DIR == expect, str(c2.APP_DIR))
+            check("退回 %APPDATA%\\AutoStep", c2.APP_DIR == expect, f"{c2.APP_DIR} vs {expect}")
         finally:
             Path.write_text = real_write  # type: ignore[assignment]
     finally:
